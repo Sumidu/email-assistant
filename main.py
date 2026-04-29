@@ -19,6 +19,7 @@ from modules.imap_fetcher       import IMAPFetcher
 from modules.knowledge_builder  import KnowledgeBuilder
 from modules.response_generator import ResponseGenerator
 from modules                    import database
+from modules                    import keychain_store
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ def _load_config() -> dict:
 
 def _save_config():
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+        json.dump(keychain_store.strip_secrets(config), f, indent=2)
 
 
 def _migrate_config(cfg: dict) -> dict:
@@ -76,6 +77,8 @@ def _make_account_id(name: str, existing_ids: list[str]) -> str:
 
 
 config = _migrate_config(_load_config())
+keychain_store.migrate(config, _save_config)   # move any plaintext secrets → keychain
+keychain_store.inject_secrets(config)          # populate in-memory config from keychain
 
 # ── DB init ──────────────────────────────────────────────────────────────────
 
@@ -167,20 +170,22 @@ def api_accounts_create():
     existing_ids = [a["id"] for a in config.get("accounts", [])]
     new_id = _make_account_id(data["name"], existing_ids)
 
-    account = {
-        "id":   new_id,
-        "name": data["name"],
-        "imap": data.get("imap", {
-            "server": "", "port": 993, "username": "", "password": "",
-            "inbox_folder": "INBOX", "sent_folder": "Sent Items", "fetch_limit": 300,
-        }),
-    }
+    imap_data = data.get("imap", {
+        "server": "", "port": 993, "username": "", "password": "",
+        "inbox_folder": "INBOX", "sent_folder": "Sent Items", "fetch_limit": 300,
+    })
+    # Store password in keychain; keep empty string in config
+    password = imap_data.pop("password", "") or ""
+    keychain_store.set_imap_password(new_id, password)
+
+    account = {"id": new_id, "name": data["name"], "imap": imap_data}
+    account["imap"]["password"] = password          # in-memory only
     config.setdefault("accounts", []).append(account)
     _save_config()
     fetchers[new_id] = IMAPFetcher(account)
 
     safe = json.loads(json.dumps(account))
-    safe["imap"]["password"] = "••••••••" if safe["imap"].get("password") else ""
+    safe["imap"]["password"] = "••••••••" if password else ""
     return jsonify({"success": True, "account": safe})
 
 
@@ -198,9 +203,12 @@ def api_accounts_update(account_id):
         acct["name"] = data["name"]
     if "imap" in data:
         for k, v in data["imap"].items():
-            if k == "password" and v == "••••••••":
-                continue
-            acct["imap"][k] = v
+            if k == "password":
+                if v and v != "••••••••":
+                    keychain_store.set_imap_password(account_id, v)
+                    acct["imap"]["password"] = v   # update in-memory
+            else:
+                acct["imap"][k] = v
 
     _save_config()
     fetchers[account_id] = IMAPFetcher(acct)
@@ -213,6 +221,7 @@ def api_accounts_delete(account_id):
     accounts = config.get("accounts", [])
     config["accounts"] = [a for a in accounts if a["id"] != account_id]
     fetchers.pop(account_id, None)
+    keychain_store.delete_imap_password(account_id)
     _save_config()
     return jsonify({"success": True})
 
@@ -379,6 +388,9 @@ def api_task_status():
 @app.route("/api/config", methods=["GET"])
 def api_config_get():
     safe = {k: v for k, v in config.items() if k != "accounts"}
+    safe = json.loads(json.dumps(safe))   # deep copy
+    if safe.get("lm_studio", {}).get("api_key"):
+        safe["lm_studio"]["api_key"] = "••••••••"
     return jsonify(safe)
 
 
@@ -390,6 +402,10 @@ def api_config_save():
     for section in ("lm_studio", "whisper", "app"):
         if section in data:
             config.setdefault(section, {}).update(data[section])
+    # API key lives in keychain; keep in-memory but strip from disk
+    api_key = config.get("lm_studio", {}).get("api_key", "")
+    if api_key and api_key != "••••••••":
+        keychain_store.set_api_key(api_key)
     _save_config()
     _reload_modules()
     return jsonify({"success": True})

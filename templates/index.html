@@ -1030,7 +1030,7 @@ async function saveSettings(){
   }
   // LM / Whisper
   const payload={
-    lm_studio:{base_url:document.getElementById("cfg-lm-url").value.trim(),model:document.getElementById("cfg-lm-model").value.trim(),api_key:document.getElementById("cfg-lm-apikey").value.trim()},
+    lm_studio:{base_url:document.getElementById("cfg-lm-url").value.trim(),model:document.getElementById("cfg-lm-model").value.trim(),api_key:document.getElementById("cfg-lm-apikey").value.trim().replace(/^•+$/,"")},
   };
   try{
     const res=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
