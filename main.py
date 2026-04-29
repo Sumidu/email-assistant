@@ -438,9 +438,37 @@ def api_chat():
     result = resp_gen.chat(
         email_data=data["email"],
         messages=data.get("messages", []),
-        extra_kb=data.get("extra_kb", []),
+        kb_files=data.get("kb_files", []),
     )
     return jsonify(result)
+
+
+@app.route("/api/suggested_context", methods=["POST"])
+def api_suggested_context():
+    data = request.json or {}
+    sender     = data.get("sender", "")
+    recipients = data.get("recipients", [])
+    import email.utils
+    def _addr(s):
+        addrs = email.utils.getaddresses([s])
+        return addrs[0][1].lower() if addrs else s.lower()
+    sender_addr    = _addr(sender)
+    recipient_addrs = [_addr(r.get("email", r) if isinstance(r, dict) else r) for r in recipients]
+    files = kb.suggested_context(sender_addr, recipient_addrs)
+    return jsonify(files)
+
+
+@app.route("/api/llm_log")
+def api_llm_log():
+    from modules.llm_logger import LOG_PATH
+    if not os.path.exists(LOG_PATH):
+        return jsonify({"entries": []})
+    with open(LOG_PATH, encoding="utf-8") as f:
+        raw = f.read()
+    # Split on the separator line
+    entries = [e.strip() for e in raw.split("=" * 80) if e.strip()]
+    # Return last 30 entries newest-first
+    return jsonify({"entries": list(reversed(entries[-30:]))})
 
 
 

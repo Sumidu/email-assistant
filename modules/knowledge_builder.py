@@ -353,6 +353,25 @@ Profile sections:
                             "pinned": fname in pinned})
         return result
 
+    def suggested_context(self, sender_email: str, recipient_emails=None) -> list:
+        """Return filenames that should be pre-selected for an email:
+        pinned files + _writing_style + sender contact + recipient contacts."""
+        suggested = []
+        seen = set()
+
+        def _add(fname):
+            if fname not in seen and os.path.exists(os.path.join(KNOWLEDGE_DIR, fname)):
+                suggested.append(fname)
+                seen.add(fname)
+
+        for fname in self.get_pinned():
+            _add(os.path.basename(fname))
+        _add("_writing_style.md")
+        _add(self._safe_filename(sender_email.lower()) + ".md")
+        for addr in (recipient_emails or []):
+            _add(self._safe_filename(addr.lower()) + ".md")
+        return suggested
+
     def load_knowledge_file(self, filename: str):
         fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(filename))
         if not fpath.endswith(".md") or not os.path.exists(fpath):
