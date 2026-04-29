@@ -133,7 +133,11 @@ class ResponseGenerator:
         Returns {draft, chat, kb_save, knowledge_used}.
         """
         sender    = self._sender_email(email_data.get("sender", ""))
-        knowledge = self.kb.get_knowledge_for_sender(sender)
+        knowledge = self.kb.get_knowledge_for_email(
+            sender,
+            subject=email_data.get("subject", ""),
+            body=email_data.get("body_text", ""),
+        )
         system    = self._build_system(knowledge)
 
         email_ctx = f"=== EMAIL BEING REPLIED TO ===\n{self._email_context(email_data)}"

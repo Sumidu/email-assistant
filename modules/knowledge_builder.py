@@ -292,6 +292,54 @@ Profile sections:
 
         return knowledge
 
+    def get_knowledge_for_email(self, sender_email: str, subject: str = "", body: str = "") -> list[tuple[str, str]]:
+        """Like get_knowledge_for_sender but also injects KB files for other
+        people mentioned in the email (matched by name appearing in filename
+        or the first 400 chars of a contact file)."""
+        knowledge = self.get_knowledge_for_sender(sender_email)
+        loaded_paths = {os.path.join(KNOWLEDGE_DIR, f) for f in os.listdir(KNOWLEDGE_DIR)
+                        if os.path.join(KNOWLEDGE_DIR, f) in
+                        {os.path.join(KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"),
+                         os.path.join(KNOWLEDGE_DIR, "_writing_style.md")}}
+        # build set of loaded paths from what get_knowledge_for_sender returned
+        loaded_paths = set()
+        for fname in self.get_pinned():
+            loaded_paths.add(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname)))
+        loaded_paths.add(os.path.join(KNOWLEDGE_DIR, "_writing_style.md"))
+        loaded_paths.add(os.path.join(KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"))
+
+        # Extract candidate names: capitalised words 3+ chars from subject + first 1500 chars of body
+        text = f"{subject} {body[:1500]}"
+        candidates = set(re.findall(r'\b[A-Z][a-zA-Z]{2,}\b', text))
+        # Remove common non-name words
+        stopwords = {"The","This","That","From","Dear","Kind","Best","With","Your","Please","Thank","Also","Have","Will"}
+        candidates -= stopwords
+
+        if not candidates:
+            return knowledge
+
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if not fname.endswith(".md") or fname.startswith("_"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            if fpath in loaded_paths:
+                continue
+            fname_lower = fname.lower()
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                head = content[:400].lower()
+                for name in candidates:
+                    if name.lower() in fname_lower or name.lower() in head:
+                        label = fname.replace(".md", "").replace("_", " ").title()
+                        knowledge.append((f"Related: {label}", content))
+                        loaded_paths.add(fpath)
+                        break
+            except Exception:
+                pass
+
+        return knowledge
+
     def list_knowledge_files(self) -> list[dict]:
         pinned = set(self.get_pinned())
         result = []

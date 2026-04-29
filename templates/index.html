@@ -105,7 +105,7 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 .rbtn.primary:hover{background:rgba(232,160,0,.15);}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 /* draft column */
-#draft-col{display:flex;flex-direction:column;flex:1;overflow:hidden;border-right:1px solid var(--border2);min-width:0;}
+#draft-col{display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0;}
 #draft-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:7px;flex-shrink:0;}
 #draft-label{color:var(--amber);font-size:9.5px;letter-spacing:2px;text-transform:uppercase;flex:1;}
 #kb-tags{display:none;background:var(--bg1);border-bottom:1px solid var(--border);padding:4px 14px;gap:5px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
@@ -113,8 +113,11 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 #response-text{flex:1;overflow-y:auto;padding:16px 22px;white-space:pre-wrap;font-size:12.5px;line-height:1.75;color:var(--green);scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
 #response-text.placeholder{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;}
 #response-text.loading{color:var(--amber);}
+/* column resizer */
+#col-resizer{width:5px;flex-shrink:0;cursor:col-resize;background:var(--border2);transition:background .15s;z-index:2;}
+#col-resizer:hover,#col-resizer.dragging{background:var(--amber);}
 /* chat column */
-#chat-col{display:flex;flex-direction:column;width:380px;flex-shrink:0;overflow:hidden;background:var(--bg0);}
+#chat-col{display:flex;flex-direction:column;width:420px;flex-shrink:0;overflow:hidden;background:var(--bg0);}
 #chat-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:7px 14px;font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);flex-shrink:0;}
 #chat-messages{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
 .cm{display:flex;flex-direction:column;gap:2px;max-width:100%;}
@@ -130,9 +133,9 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 .kb-proposal-name{color:var(--amber);font-size:9px;letter-spacing:1px;text-transform:uppercase;}
 .kb-proposal-actions{display:flex;gap:6px;}
 /* chat input */
-#chat-input-bar{background:var(--bg1);border-top:1px solid var(--border);padding:7px 10px;display:flex;gap:7px;align-items:flex-end;flex-shrink:0;}
-#chat-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);resize:none;min-height:22px;max-height:120px;line-height:1.55;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
-#chat-input::placeholder{color:var(--dim);}
+#chat-input-bar{background:var(--bg1);border-top:1px solid var(--border);padding:8px 10px;display:flex;gap:7px;align-items:flex-end;flex-shrink:0;}
+#chat-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);resize:none;min-height:66px;max-height:200px;line-height:1.6;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#chat-input::placeholder{color:var(--dim);white-space:pre-wrap;}
 #btn-chat-send{background:transparent;border:1px solid var(--dim);color:var(--dim);font-family:var(--font);font-size:9.5px;padding:3px 10px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all .12s;flex-shrink:0;margin-bottom:2px;}
 #btn-chat-send:hover{border-color:var(--amber);color:var(--amber);}
 
@@ -300,6 +303,8 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
           <div id="kb-tags"></div>
           <div id="response-text" class="placeholder">Click Generate or chat on the right</div>
         </div>
+        <!-- Column resizer -->
+        <div id="col-resizer"></div>
         <!-- Chat column -->
         <div id="chat-col">
           <div id="chat-header">&#9670; Chat</div>
@@ -1174,7 +1179,34 @@ document.getElementById("btn-chat-send").addEventListener("click",()=>sendChat(c
 chatInput.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendChat(chatInput.value);}
 });
-chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.style.height=Math.min(chatInput.scrollHeight,120)+"px";});
+chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.style.height=Math.min(chatInput.scrollHeight,200)+"px";});
+
+// ─── Column resizer ───────────────────────────────────────────────────────
+(()=>{
+  const resizer=document.getElementById("col-resizer");
+  const draftCol=document.getElementById("draft-col");
+  const panel=document.getElementById("response-panel");
+  let active=false,startX=0,startW=0;
+  resizer.addEventListener("mousedown",e=>{
+    active=true;startX=e.clientX;startW=draftCol.getBoundingClientRect().width;
+    resizer.classList.add("dragging");
+    document.body.style.cursor="col-resize";document.body.style.userSelect="none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove",e=>{
+    if(!active)return;
+    const dx=e.clientX-startX;
+    const panelW=panel.getBoundingClientRect().width;
+    const newW=Math.max(200,Math.min(startW+dx,panelW-200-5));
+    draftCol.style.flex="none";draftCol.style.width=newW+"px";
+  });
+  document.addEventListener("mouseup",()=>{
+    if(!active)return;active=false;
+    resizer.classList.remove("dragging");
+    document.body.style.cursor="";document.body.style.userSelect="";
+  });
+})();
+
 loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(true);});
 
 // ─── Init ─────────────────────────────────────────────────────────────────
