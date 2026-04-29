@@ -126,7 +126,7 @@ class ResponseGenerator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def chat(self, email_data: dict, messages: list, extra_kb: list[str] | None = None) -> dict:
+    def chat(self, email_data: dict, messages: list, extra_kb=None) -> dict:
         """
         Multi-turn chat. `messages` is the full conversation history
         [{role: "user"|"assistant", content: "..."}].
