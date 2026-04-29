@@ -97,26 +97,44 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 #email-body.html-view p,#email-body.html-view div{margin-bottom:4px;}
 #email-body.placeholder{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;white-space:normal;}
 
-/* ─── Response panel ─────────────────────────────────────────────────────── */
-#response-panel{display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:120px;background:var(--bg0);}
-#response-panel-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;}
-#rph-label{color:var(--amber);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;flex:1;}
-#response-actions{display:flex;gap:6px;align-items:center;}
+/* ─── Response panel (draft + chat columns) ──────────────────────────────── */
+#response-panel{display:flex;flex-direction:row;overflow:hidden;flex:1;min-height:120px;}
 .rbtn{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font);font-size:9.5px;padding:3px 9px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .12s;}
 .rbtn:hover{border-color:var(--amber);color:var(--amber);}
 .rbtn.primary{border-color:var(--amber);color:var(--amber);background:rgba(232,160,0,.08);}
 .rbtn.primary:hover{background:rgba(232,160,0,.15);}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
-#response-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-#instruction-bar{background:var(--bg1);border-bottom:1px solid var(--border);padding:6px 14px;display:flex;gap:8px;align-items:flex-end;flex-shrink:0;}
-#instruction-bar .prompt{color:var(--green2);font-size:11px;flex-shrink:0;padding-bottom:2px;}
-#instruction-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);resize:none;min-height:22px;max-height:120px;line-height:1.55;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
-#instruction-input::placeholder{color:var(--dim);}
-.run-btn{background:transparent;border:1px solid var(--dim);color:var(--dim);font-family:var(--font);font-size:9.5px;padding:2px 8px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all .12s;flex-shrink:0;margin-bottom:2px;}
-.run-btn:hover{border-color:var(--amber);color:var(--amber);}
+/* draft column */
+#draft-col{display:flex;flex-direction:column;flex:1;overflow:hidden;border-right:1px solid var(--border2);min-width:0;}
+#draft-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;align-items:center;gap:7px;flex-shrink:0;}
+#draft-label{color:var(--amber);font-size:9.5px;letter-spacing:2px;text-transform:uppercase;flex:1;}
+#kb-tags{display:none;background:var(--bg1);border-bottom:1px solid var(--border);padding:4px 14px;gap:5px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
+.kb-tag{background:var(--bg3);border:1px solid var(--border2);color:var(--muted);font-size:9px;padding:1px 7px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
 #response-text{flex:1;overflow-y:auto;padding:16px 22px;white-space:pre-wrap;font-size:12.5px;line-height:1.75;color:var(--green);scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
 #response-text.placeholder{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;}
 #response-text.loading{color:var(--amber);}
+/* chat column */
+#chat-col{display:flex;flex-direction:column;width:380px;flex-shrink:0;overflow:hidden;background:var(--bg0);}
+#chat-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:7px 14px;font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);flex-shrink:0;}
+#chat-messages{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+.cm{display:flex;flex-direction:column;gap:2px;max-width:100%;}
+.cm-role{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);flex-shrink:0;}
+.cm.user .cm-role{color:var(--blue);text-align:right;}
+.cm.assistant .cm-role{color:var(--amber);}
+.cm-body{font-size:11.5px;line-height:1.65;color:var(--text);white-space:pre-wrap;word-break:break-word;}
+.cm.user .cm-body{background:var(--bg2);padding:7px 11px;border-radius:2px;text-align:right;}
+.cm.thinking .cm-body{color:var(--dim);font-style:italic;font-size:10.5px;}
+.cm.thinking .cm-role{color:var(--dim);}
+/* kb-save proposal bubble */
+.kb-proposal{background:var(--bg3);border:1px solid var(--border2);padding:8px 12px;font-size:10.5px;display:flex;flex-direction:column;gap:6px;}
+.kb-proposal-name{color:var(--amber);font-size:9px;letter-spacing:1px;text-transform:uppercase;}
+.kb-proposal-actions{display:flex;gap:6px;}
+/* chat input */
+#chat-input-bar{background:var(--bg1);border-top:1px solid var(--border);padding:7px 10px;display:flex;gap:7px;align-items:flex-end;flex-shrink:0;}
+#chat-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);resize:none;min-height:22px;max-height:120px;line-height:1.55;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#chat-input::placeholder{color:var(--dim);}
+#btn-chat-send{background:transparent;border:1px solid var(--dim);color:var(--dim);font-family:var(--font);font-size:9.5px;padding:3px 10px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all .12s;flex-shrink:0;margin-bottom:2px;}
+#btn-chat-send:hover{border-color:var(--amber);color:var(--amber);}
 
 /* ─── Status bar ─────────────────────────────────────────────────────────── */
 #statusbar{grid-area:statusbar;background:var(--bg2);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:14px;font-size:9.5px;color:var(--dim);letter-spacing:.5px;}
@@ -271,22 +289,25 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
       </div>
 
       <div id="response-panel">
-        <div id="response-panel-header">
-          <span id="rph-label">&#9654; Proposed Response</span>
-          <div id="response-actions">
+        <!-- Draft column -->
+        <div id="draft-col">
+          <div id="draft-header">
+            <span id="draft-label">&#9654; Draft</span>
             <button class="rbtn primary" id="btn-propose">Generate</button>
             <button class="rbtn" id="btn-copy">Copy</button>
             <button class="rbtn" id="btn-clear-resp">Clear</button>
           </div>
+          <div id="kb-tags"></div>
+          <div id="response-text" class="placeholder">Click Generate or chat on the right</div>
         </div>
-        <div id="kb-tags"></div>
-        <div id="response-area">
-          <div id="instruction-bar">
-            <span class="prompt">&gt;</span>
-            <textarea id="instruction-input" rows="1" placeholder="Instruction — e.g. 'keep it short and politely decline'…" autocomplete="off"></textarea>
-            <button class="run-btn" id="btn-run-instruction">Run</button>
+        <!-- Chat column -->
+        <div id="chat-col">
+          <div id="chat-header">&#9670; Chat</div>
+          <div id="chat-messages"></div>
+          <div id="chat-input-bar">
+            <textarea id="chat-input" rows="1" placeholder="Ask about this email, request changes to the draft, add to knowledge base…" autocomplete="off"></textarea>
+            <button id="btn-chat-send">Send</button>
           </div>
-          <div id="response-text" class="placeholder">Generate a response or give an instruction above</div>
         </div>
       </div>
     </div>
@@ -631,14 +652,14 @@ searchInput.addEventListener("input",()=>{
 // ─── Open email ───────────────────────────────────────────────────────────
 const emailSubject=document.getElementById("email-subject"),emailMeta=document.getElementById("email-meta");
 const emailBody=document.getElementById("email-body"),responseText=document.getElementById("response-text");
-const instrInput=document.getElementById("instruction-input");
 
 async function openEmail(id,el){
   document.querySelectorAll(".email-item").forEach(x=>x.classList.remove("selected"));
   if(el)el.classList.add("selected");
   emailBody.textContent="Loading…";emailBody.className="";
-  responseText.textContent="Generate a response or give an instruction above";responseText.className="placeholder";
+  responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
   currentResponse="";kbTagsEl.style.display="none";
+  chatHistory=[];renderChatMessages();
   try{
     const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
     if(data.error){emailBody.textContent="Error: "+data.error;return;}
@@ -669,40 +690,109 @@ function sanitizeEmailHtml(raw){
   return h;
 }
 
-// ─── Response ─────────────────────────────────────────────────────────────
+// ─── Draft + Chat ─────────────────────────────────────────────────────────
 const kbTagsEl=document.getElementById("kb-tags");
+const chatMessagesEl=document.getElementById("chat-messages");
+const chatInput=document.getElementById("chat-input");
+let chatHistory=[];   // [{role,content}] sent to backend
+
 function showKbTags(tags){
   if(!tags||!tags.length){kbTagsEl.style.display="none";return;}
   kbTagsEl.innerHTML=tags.map(t=>`<span class="kb-tag">${escHtml(t)}</span>`).join("");
   kbTagsEl.style.display="flex";
 }
 
-async function proposeResponse(){
-  if(!currentEmail){setStatus("Select an email first","err");return;}
-  responseText.textContent="Generating…";responseText.className="loading";setStatus("Calling LM Studio…","busy");
-  kbTagsEl.style.display="none";
-  try{
-    const data=await fetch("/api/propose_response",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:currentEmail})}).then(r=>r.json());
-    currentResponse=data.response||"";responseText.textContent=currentResponse;responseText.className="";
-    showKbTags(data.knowledge_used);setStatus("Response generated","ok");
-  }catch(err){responseText.textContent="Error: "+err.message;responseText.className="";setStatus("LM Studio error: "+err.message,"err");}
+function renderChatMessages(){
+  chatMessagesEl.innerHTML="";
+  if(!chatHistory.length){
+    chatMessagesEl.innerHTML='<div style="color:var(--dim);font-size:10.5px;padding:18px 0;text-align:center;">Ask something or click Generate to start.</div>';
+    return;
+  }
+  chatHistory.forEach(m=>{
+    const div=document.createElement("div");
+    div.className="cm "+(m.role==="user"?"user":"assistant");
+    div.innerHTML=`<div class="cm-role">${m.role==="user"?"You":"Assistant"}</div><div class="cm-body">${escHtml(m.content)}</div>`;
+    chatMessagesEl.appendChild(div);
+  });
+  chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
 }
 
-async function runInstruction(instruction){
+function addChatMessage(role,content){
+  chatHistory.push({role,content});
+  renderChatMessages();
+}
+
+function appendThinking(text){
+  const div=document.createElement("div");
+  div.className="cm thinking";
+  div.innerHTML=`<div class="cm-role">Thinking</div><div class="cm-body">${escHtml(text)}</div>`;
+  chatMessagesEl.appendChild(div);
+  chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
+}
+
+function offerKbSave(kbSave){
+  const div=document.createElement("div");
+  div.className="cm assistant";
+  div.innerHTML=`<div class="cm-role">Assistant</div>
+    <div class="kb-proposal">
+      <div class="kb-proposal-name">&#9670; Save to knowledge base: ${escHtml(kbSave.filename)}.md</div>
+      <pre style="font-size:10px;color:var(--muted);max-height:80px;overflow:auto;margin:0;">${escHtml(kbSave.content.slice(0,300))}${kbSave.content.length>300?"…":""}</pre>
+      <div class="kb-proposal-actions">
+        <button class="rbtn primary" id="kb-save-yes">Save</button>
+        <button class="rbtn" id="kb-save-no">Dismiss</button>
+      </div>
+    </div>`;
+  chatMessagesEl.appendChild(div);
+  chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
+  div.querySelector("#kb-save-yes").addEventListener("click",async()=>{
+    await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:kbSave.filename,content:kbSave.content})});
+    div.querySelector(".kb-proposal-actions").innerHTML='<span style="color:var(--green);font-size:10px;">&#10003; Saved</span>';
+    setStatus("Saved to knowledge base: "+kbSave.filename+".md","ok");
+  });
+  div.querySelector("#kb-save-no").addEventListener("click",()=>div.querySelector(".kb-proposal-actions").innerHTML='<span style="color:var(--dim);font-size:10px;">Dismissed</span>');
+}
+
+async function sendChat(userText){
   if(!currentEmail){setStatus("Select an email first","err");return;}
-  if(!instruction.trim()){setStatus("Enter an instruction","err");return;}
-  responseText.textContent="Processing…";responseText.className="loading";setStatus("Applying instruction…","busy");
+  if(!userText.trim())return;
+  addChatMessage("user",userText);
+  chatInput.value="";chatInput.style.height="auto";
+  setStatus("Thinking…","busy");
+  // show pending indicator
+  const pending=document.createElement("div");
+  pending.className="cm assistant";
+  pending.innerHTML='<div class="cm-role">Assistant</div><div class="cm-body" style="color:var(--amber);">…</div>';
+  chatMessagesEl.appendChild(pending);chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
   try{
-    const data=await fetch("/api/generate_with_instruction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:currentEmail,instruction,current_response:currentResponse})}).then(r=>r.json());
-    currentResponse=data.response||"";responseText.textContent=currentResponse;responseText.className="";
-    showKbTags(data.knowledge_used);setStatus("Response updated","ok");instrInput.value="";
-  }catch(err){responseText.className="";setStatus("Error: "+err.message,"err");}
+    const data=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email:currentEmail,messages:chatHistory})}).then(r=>r.json());
+    chatMessagesEl.removeChild(pending);
+    // Update draft panel if draft was provided
+    if(data.draft){
+      currentResponse=data.draft;
+      responseText.textContent=currentResponse;responseText.className="";
+    }
+    // Show chat reply
+    if(data.chat) addChatMessage("assistant",data.chat);
+    // KB save proposal
+    if(data.kb_save) offerKbSave(data.kb_save);
+    showKbTags(data.knowledge_used);
+    setStatus("Done","ok");
+  }catch(err){
+    chatMessagesEl.removeChild(pending);
+    addChatMessage("assistant","[Error: "+err.message+"]");
+    setStatus("Error: "+err.message,"err");
+  }
 }
 
 const copyToast=document.getElementById("copy-toast");
 function copyResponse(){
   if(!currentResponse||responseText.classList.contains("placeholder"))return;
   navigator.clipboard.writeText(currentResponse).then(()=>{copyToast.classList.add("show");setTimeout(()=>copyToast.classList.remove("show"),1800);});
+}
+
+function proposeResponse(){
+  sendChat("Please draft a reply to this email.");
 }
 
 
@@ -1076,15 +1166,15 @@ document.getElementById("btn-acct-back").addEventListener("click",()=>{switchTab
 document.getElementById("btn-propose").addEventListener("click",proposeResponse);
 document.getElementById("btn-copy").addEventListener("click",copyResponse);
 document.getElementById("btn-clear-resp").addEventListener("click",()=>{
-  responseText.textContent="Generate a response or give an instruction above";responseText.className="placeholder";
-  currentResponse="";instrInput.value="";kbTagsEl.style.display="none";
+  responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
+  currentResponse="";kbTagsEl.style.display="none";
+  chatHistory=[];renderChatMessages();
 });
-document.getElementById("btn-run-instruction").addEventListener("click",()=>runInstruction(instrInput.value));
-instrInput.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();runInstruction(instrInput.value);}
+document.getElementById("btn-chat-send").addEventListener("click",()=>sendChat(chatInput.value));
+chatInput.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendChat(chatInput.value);}
 });
-// Auto-grow textarea
-instrInput.addEventListener("input",()=>{instrInput.style.height="auto";instrInput.style.height=Math.min(instrInput.scrollHeight,120)+"px";});
+chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.style.height=Math.min(chatInput.scrollHeight,120)+"px";});
 loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(true);});
 
 // ─── Init ─────────────────────────────────────────────────────────────────

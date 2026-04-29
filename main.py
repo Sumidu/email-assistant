@@ -410,26 +410,16 @@ def api_config_save():
     return jsonify({"success": True})
 
 
-# --- Response generation ---
+# --- Chat / response generation ---
 
-@app.route("/api/propose_response", methods=["POST"])
-def api_propose_response():
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
     data = request.json
     if not data or "email" not in data:
         return jsonify({"error": "Missing email data"}), 400
-    result = resp_gen.generate_response(data["email"])
-    return jsonify(result)
-
-
-@app.route("/api/generate_with_instruction", methods=["POST"])
-def api_generate_with_instruction():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data"}), 400
-    result = resp_gen.generate_with_instruction(
-        data.get("email", {}),
-        data.get("instruction", ""),
-        data.get("current_response", ""),
+    result = resp_gen.chat(
+        email_data=data["email"],
+        messages=data.get("messages", []),
     )
     return jsonify(result)
 
