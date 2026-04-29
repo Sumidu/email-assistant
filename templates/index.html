@@ -197,6 +197,7 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 .kb-tag-active{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--amber);color:var(--amber);font-size:9px;padding:1px 6px;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;}
 .kb-tag-active button{background:none;border:none;color:var(--amber);cursor:pointer;font-size:11px;line-height:1;padding:0 0 0 2px;opacity:.6;}
 .kb-tag-active button:hover{opacity:1;}
+.kb-tag-auto{display:inline-flex;align-items:center;background:var(--bg3);border:1px solid var(--border2);color:var(--muted);font-size:9px;padding:1px 7px;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;}
 
 /* ─── Knowledge modal ────────────────────────────────────────────────────── */
 #kb-body{display:flex;flex:1;overflow:hidden;}
@@ -702,7 +703,7 @@ async function openEmail(id,el){
   if(el)el.classList.add("selected");
   emailBody.textContent="Loading…";emailBody.className="";
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
-  currentResponse="";activeCtxFiles=new Set();renderCtxTags();
+  currentResponse="";activeCtxFiles=new Set();autoCtxTitles=[];renderCtxTags();
   chatHistory=[];renderChatMessages();
   try{
     const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
@@ -740,13 +741,18 @@ const chatMessagesEl=document.getElementById("chat-messages");
 const chatInput=document.getElementById("chat-input");
 let chatHistory=[];   // [{role,content}] sent to backend
 let activeCtxFiles=new Set(); // filenames explicitly added by user
+let autoCtxTitles=[];         // titles auto-loaded by backend (from last response)
 
 function renderCtxTags(){
-  if(!activeCtxFiles.size){kbTagsEl.style.display="none";return;}
-  kbTagsEl.innerHTML=[...activeCtxFiles].map(f=>{
+  const hasAuto=autoCtxTitles.length>0;
+  const hasManual=activeCtxFiles.size>0;
+  if(!hasAuto&&!hasManual){kbTagsEl.style.display="none";return;}
+  const autoHtml=autoCtxTitles.map(t=>`<span class="kb-tag-auto" title="Auto-loaded">${escHtml(t)}</span>`).join("");
+  const manualHtml=[...activeCtxFiles].map(f=>{
     const label=f.replace(".md","").replace(/_/g," ");
     return `<span class="kb-tag-active">${escHtml(label)}<button data-f="${escHtml(f)}" title="Remove">&#215;</button></span>`;
   }).join("");
+  kbTagsEl.innerHTML=autoHtml+(hasAuto&&hasManual?'<span style="color:var(--border2);padding:0 3px;">|</span>':"")+manualHtml;
   kbTagsEl.style.display="flex";
   kbTagsEl.querySelectorAll("button[data-f]").forEach(btn=>{
     btn.addEventListener("click",()=>{activeCtxFiles.delete(btn.dataset.f);renderCtxTags();});
@@ -875,6 +881,8 @@ async function sendChat(userText){
     if(data.chat) addChatMessage("assistant",data.chat);
     // KB save proposal
     if(data.kb_save) offerKbSave(data.kb_save);
+    autoCtxTitles=data.knowledge_used||[];
+    renderCtxTags();
     setStatus("Done","ok");
   }catch(err){
     chatMessagesEl.removeChild(pending);
@@ -1265,7 +1273,7 @@ document.getElementById("btn-propose").addEventListener("click",proposeResponse)
 document.getElementById("btn-copy").addEventListener("click",copyResponse);
 document.getElementById("btn-clear-resp").addEventListener("click",()=>{
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
-  currentResponse="";activeCtxFiles=new Set();renderCtxTags();
+  currentResponse="";activeCtxFiles=new Set();autoCtxTitles=[];renderCtxTags();
   chatHistory=[];renderChatMessages();
 });
 document.getElementById("btn-chat-send").addEventListener("click",()=>sendChat(chatInput.value));
