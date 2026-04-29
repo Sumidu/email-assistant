@@ -41,10 +41,11 @@ Flask app (`main.py`) with four modules and a SQLite backend.
 
 ## Config
 
-Copy `config.json.example` → `config.json`. Key fields:
+Config is stored at `~/email_assistant/config.json` (survives app rebuilds).
+On first run it is auto-migrated from any old location beside the binary.
+Key fields:
 - `imap.sent_folder`: `"Sent Items"` for Outlook, `"Sent"` for Gmail
 - `lm_studio.model`: ignored when LM Studio has one model loaded; set to `"local-model"` as default
-- `whisper.model`: `"base"` recommended; `"tiny"` for speed
 
 ## Runtime data locations
 

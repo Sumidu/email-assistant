@@ -23,15 +23,33 @@ from modules                    import keychain_store
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-# When frozen, config.json lives next to the .app (not inside it)
-if getattr(sys, "frozen", False):
-    _CONFIG_DIR = os.path.dirname(sys.executable)  # .app/Contents/MacOS/
-    # Go up to sit beside the .app bundle itself
-    _CONFIG_DIR = os.path.abspath(os.path.join(_CONFIG_DIR, "..", "..", ".."))
-else:
-    _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+# Config lives in ~/email_assistant/ so it survives app rebuilds/updates.
+# Migrate from old location (next to the binary) on first run if found.
+_DATA_DIR   = os.path.expanduser("~/email_assistant")
+os.makedirs(_DATA_DIR, exist_ok=True)
+CONFIG_PATH = os.path.join(_DATA_DIR, "config.json")
 
-CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.json")
+def _migrate_config_location():
+    """Move config.json from old location beside the binary to ~/email_assistant/."""
+    if os.path.exists(CONFIG_PATH):
+        return  # already in new location
+    candidates = []
+    if getattr(sys, "frozen", False):
+        old_dir = os.path.abspath(
+            os.path.join(os.path.dirname(sys.executable), "..", "..", "..")
+        )
+        candidates.append(os.path.join(old_dir, "config.json"))
+    candidates.append(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    )
+    for old_path in candidates:
+        if os.path.exists(old_path):
+            import shutil
+            shutil.copy2(old_path, CONFIG_PATH)
+            print(f"[config] Migrated config from {old_path} → {CONFIG_PATH}")
+            break
+
+_migrate_config_location()
 
 DEFAULT_CONFIG = {
     "accounts": [],
