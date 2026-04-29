@@ -15,7 +15,7 @@ fi
 source .venv/bin/activate
 
 echo "==> Installing build dependencies"
-pip install --quiet pyinstaller rumps
+pip install --quiet pyinstaller pywebview
 
 echo "==> Cleaning previous build"
 rm -rf build dist

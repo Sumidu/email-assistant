@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for Email Assistant macOS .app
-# Build with:  pyinstaller EmailAssistant.spec
+# Build with:  ./build_app.sh
 
 import os
 block_cipher = None
@@ -10,21 +10,19 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        ('templates', 'templates'),   # Jinja2 templates
-        ('modules',   'modules'),     # Python modules (for any data files)
+        ('templates', 'templates'),
     ],
     hiddenimports=[
         # Flask ecosystem
         'flask', 'jinja2', 'werkzeug', 'click',
-        # Requests / urllib3
+        # Requests
         'requests', 'urllib3', 'certifi', 'charset_normalizer', 'idna',
-        # DB
-        'sqlite3',
-        # Email parsing
-        'email', 'email.header', 'email.utils', 'imaplib', 'html.parser',
-        # rumps / pyobjc
-        'rumps',
-        'objc', 'AppKit', 'Foundation',
+        # DB / stdlib
+        'sqlite3', 'email', 'email.header', 'email.utils', 'imaplib', 'html.parser',
+        # pywebview
+        'webview', 'webview.platforms.cocoa',
+        # pyobjc required by pywebview on macOS
+        'objc', 'AppKit', 'Foundation', 'WebKit',
     ],
     hookspath=[],
     hooksconfig={},
@@ -33,8 +31,6 @@ a = Analysis(
         'openai_whisper', 'whisper', 'torch', 'torchaudio',
         'numpy', 'tkinter', 'matplotlib',
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
@@ -51,7 +47,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,          # no terminal window
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
@@ -72,13 +68,13 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Email Assistant.app',
-    icon=None,              # set to 'assets/icon.icns' if you create one
+    icon=None,              # set to 'assets/icon.icns' if you have one
     bundle_identifier='com.emailassistant.app',
     info_plist={
         'NSPrincipalClass': 'NSApplication',
         'NSHighResolutionCapable': True,
-        'LSUIElement': True,          # hides from Dock — menu bar only
         'CFBundleShortVersionString': '1.0.0',
         'NSHumanReadableCopyright': '',
+        # No LSUIElement — app shows in Dock like a normal window app
     },
 )
