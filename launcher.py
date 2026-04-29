@@ -57,6 +57,7 @@ if __name__ == "__main__":
         height=900,
         min_size=(900, 600),
         text_select=True,
+        zoomable=True,
     )
 
     # Load the real URL once Flask is ready
