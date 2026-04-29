@@ -4,10 +4,12 @@ Chat-based email assistant using an XML tag protocol to separate
 the email draft from conversational responses.
 
 Tag protocol:
-  <draft>...</draft>       — the email to put in the draft panel (optional per turn)
-  <chat>...</chat>         — conversational reply shown in the chat panel (always)
-  <kb_save filename="x">  — save/update a knowledge file (optional)
+  <draft>...</draft>         — the email to put in the draft panel (optional per turn)
+  <chat>...</chat>           — conversational reply shown in the chat panel (always)
+  <kb_save filename="x">    — save/update a knowledge file (optional)
   </kb_save>
+  <kb_list/>                 — query: list all KB files (app replies, LLM continues)
+  <kb_read filename="x.md"/> — query: read a specific KB file (app replies, LLM continues)
 """
 
 import email.utils
@@ -15,8 +17,10 @@ import re
 
 import requests
 
-from .knowledge_builder import KnowledgeBuilder
+from .knowledge_builder import KnowledgeBuilder, KNOWLEDGE_DIR
 from . import llm_logger
+
+import os
 
 
 _ASCII_RULE = (
@@ -44,8 +48,13 @@ Optionally, to save something to the knowledge base:
 [Markdown content to save as a knowledge file]
 </kb_save>
 
+To look up the knowledge base before responding, use ONE of these query tags
+INSTEAD of <chat>/<draft> — the app will reply with the result and you continue:
+<kb_list/>
+<kb_read filename="exact_filename.md"/>
+
 RULES:
-- <chat> is REQUIRED in every response.
+- <chat> is REQUIRED in every final response (after any KB queries are resolved).
 - <draft> is optional — only include it when you are setting or changing the email draft.
 - Inside <draft>: {ascii_rule}
 - Inside <chat>: write naturally, reasoning is welcome.
@@ -54,6 +63,8 @@ RULES:
 - Keep drafts concise and natural — never sound like a template.
 
 {kb_text}"""
+
+_MAX_KB_HOPS = 3  # max KB query round-trips per turn
 
 
 class ResponseGenerator:
@@ -105,7 +116,7 @@ class ResponseGenerator:
 
     @staticmethod
     def _parse(raw: str) -> dict:
-        """Extract draft / chat / kb_save from a tagged response."""
+        """Extract draft / chat / kb_save / kb_query from a tagged response."""
         def _tag(name, text):
             m = re.search(rf"<{name}[^>]*>(.*?)</{name}>", text, re.DOTALL)
             return m.group(1).strip() if m else None
@@ -118,11 +129,42 @@ class ResponseGenerator:
         )
         kb_save = {"filename": kb_m.group(1), "content": kb_m.group(2).strip()} if kb_m else None
 
+        # KB query tags (self-closing)
+        kb_query = None
+        if re.search(r'<kb_list\s*/?>', raw):
+            kb_query = {"action": "list"}
+        else:
+            m = re.search(r'<kb_read\s+filename=["\']?([^"\'>\s/]+)["\']?\s*/?>', raw)
+            if m:
+                kb_query = {"action": "read", "filename": m.group(1)}
+
         # Fallback: model ignored the format — treat whole response as chat
-        if not chat:
+        if not chat and not kb_query:
             chat = raw.strip()
 
-        return {"draft": draft, "chat": chat, "kb_save": kb_save, "raw": raw}
+        return {"draft": draft, "chat": chat, "kb_save": kb_save,
+                "kb_query": kb_query, "raw": raw}
+
+    def _fulfill_kb_query(self, query: dict) -> str:
+        """Execute a KB query and return the result as a string to inject."""
+        if query["action"] == "list":
+            try:
+                files = sorted(os.listdir(KNOWLEDGE_DIR))
+                md_files = [f for f in files if f.endswith(".md")]
+                if not md_files:
+                    return "<kb_result>Knowledge base is empty.</kb_result>"
+                listing = "\n".join(md_files)
+                return f"<kb_result>\n{listing}\n</kb_result>"
+            except Exception as exc:
+                return f"<kb_result>Error listing KB: {exc}</kb_result>"
+
+        if query["action"] == "read":
+            content = self.kb.load_knowledge_file(query["filename"])
+            if content is None:
+                return f"<kb_result>File not found: {query['filename']}</kb_result>"
+            return f"<kb_result filename=\"{query['filename']}\">\n{content}\n</kb_result>"
+
+        return "<kb_result>Unknown query.</kb_result>"
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -141,7 +183,7 @@ class ResponseGenerator:
                 label = filename.replace(".md", "").replace("_", " ").title()
                 knowledge.append((label, content))
                 seen.add(filename)
-        system    = self._build_system(knowledge)
+        system = self._build_system(knowledge)
 
         email_ctx = f"=== EMAIL BEING REPLIED TO ===\n{self._email_context(email_data)}"
         full_messages = (
@@ -152,16 +194,30 @@ class ResponseGenerator:
         )
 
         try:
-            raw    = self._call_messages(full_messages)
-            result = self._parse(raw)
+            result = None
+            for hop in range(_MAX_KB_HOPS + 1):
+                raw    = self._call_messages(full_messages)
+                result = self._parse(raw)
+                llm_logger.log("chat", system, str(full_messages[-1:]), raw,
+                               model=self.lm.get("model", ""))
+
+                if not result["kb_query"] or hop == _MAX_KB_HOPS:
+                    break
+
+                # Fulfill the KB query and continue the conversation
+                kb_result = self._fulfill_kb_query(result["kb_query"])
+                full_messages.append({"role": "assistant", "content": raw})
+                full_messages.append({"role": "user",      "content": kb_result})
+
             result["knowledge_used"] = [t for t, _ in knowledge]
-            llm_logger.log("chat", system, str(messages[-1:]), raw, model=self.lm.get("model",""))
             return result
+
         except Exception as exc:
             return {
                 "draft": None,
                 "chat":  f"[Error: {exc}]",
                 "kb_save": None,
+                "kb_query": None,
                 "knowledge_used": [],
                 "raw": "",
             }
