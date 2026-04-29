@@ -134,8 +134,12 @@ class ResponseGenerator:
         Returns {draft, chat, kb_save, knowledge_used}.
         """
         sender    = self._sender_email(email_data.get("sender", ""))
-        knowledge = self.kb.get_knowledge_for_sender(sender)
-        # Append user-selected extra KB files (deduplicated by path)
+        knowledge = self.kb.get_knowledge_for_email(
+            sender,
+            subject=email_data.get("subject", ""),
+            body=email_data.get("body_text", ""),
+        )
+        # Append user-selected extra KB files (deduplicated)
         if extra_kb:
             loaded_names = {t for t, _ in knowledge}
             for filename in extra_kb:
