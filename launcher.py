@@ -36,10 +36,29 @@ def _wait_for_server(timeout=15):
     return False
 
 
+_ZOOM_JS = """
+(function() {
+    var zoom = 1.0;
+    document.addEventListener('keydown', function(e) {
+        if (!e.metaKey) return;
+        if (e.key === '=' || e.key === '+') {
+            e.preventDefault(); zoom = Math.min(zoom + 0.1, 3.0);
+        } else if (e.key === '-') {
+            e.preventDefault(); zoom = Math.max(zoom - 0.1, 0.3);
+        } else if (e.key === '0') {
+            e.preventDefault(); zoom = 1.0;
+        } else { return; }
+        document.body.style.zoom = zoom;
+    });
+})();
+"""
+
 def _start_server_then_load(window):
     """Called from a thread after webview is initialised; loads URL when ready."""
     if _wait_for_server():
         window.load_url(URL)
+        time.sleep(0.5)          # let the page render before injecting
+        window.evaluate_js(_ZOOM_JS)
     else:
         window.load_html("<h2 style='font-family:sans-serif;padding:40px'>Server failed to start.</h2>")
 
