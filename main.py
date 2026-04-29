@@ -420,6 +420,7 @@ def api_chat():
     result = resp_gen.chat(
         email_data=data["email"],
         messages=data.get("messages", []),
+        extra_kb=data.get("extra_kb", []),
     )
     return jsonify(result)
 

@@ -353,6 +353,13 @@ Profile sections:
                             "pinned": fname in pinned})
         return result
 
+    def load_knowledge_file(self, filename: str) -> str | None:
+        fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(filename))
+        if not fpath.endswith(".md") or not os.path.exists(fpath):
+            return None
+        with open(fpath, "r", encoding="utf-8") as f:
+            return f.read()
+
     def save_knowledge_file(self, filename: str, content: str) -> dict:
         if not filename.endswith(".md"):
             filename += ".md"

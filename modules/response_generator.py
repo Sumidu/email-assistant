@@ -126,18 +126,25 @@ class ResponseGenerator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def chat(self, email_data: dict, messages: list) -> dict:
+    def chat(self, email_data: dict, messages: list, extra_kb: list[str] | None = None) -> dict:
         """
         Multi-turn chat. `messages` is the full conversation history
         [{role: "user"|"assistant", content: "..."}].
+        `extra_kb` is an optional list of KB filenames explicitly chosen by the user.
         Returns {draft, chat, kb_save, knowledge_used}.
         """
         sender    = self._sender_email(email_data.get("sender", ""))
-        knowledge = self.kb.get_knowledge_for_email(
-            sender,
-            subject=email_data.get("subject", ""),
-            body=email_data.get("body_text", ""),
-        )
+        knowledge = self.kb.get_knowledge_for_sender(sender)
+        # Append user-selected extra KB files (deduplicated by path)
+        if extra_kb:
+            loaded_names = {t for t, _ in knowledge}
+            for filename in extra_kb:
+                content = self.kb.load_knowledge_file(filename)
+                if content is not None:
+                    label = filename.replace(".md", "").replace("_", " ").title()
+                    if label not in loaded_names:
+                        knowledge.append((label, content))
+                        loaded_names.add(label)
         system    = self._build_system(knowledge)
 
         email_ctx = f"=== EMAIL BEING REPLIED TO ===\n{self._email_context(email_data)}"

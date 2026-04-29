@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -178,6 +178,18 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 .modal-close{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;font-family:var(--font);line-height:1;}
 .modal-close:hover{color:var(--red);}
 
+/* ─── Context picker ─────────────────────────────────────────────────────── */
+.ctx-item{display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;transition:background .1s;border-bottom:1px solid var(--border);}
+.ctx-item:last-child{border-bottom:none;}
+.ctx-item:hover{background:var(--bg2);}
+.ctx-item input[type=checkbox]{accent-color:var(--amber);width:14px;height:14px;flex-shrink:0;cursor:pointer;}
+.ctx-item-name{flex:1;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ctx-item-badge{font-size:9px;padding:1px 6px;border-radius:2px;background:var(--amber);color:#000;font-weight:bold;letter-spacing:.5px;text-transform:uppercase;flex-shrink:0;}
+.ctx-item.selected .ctx-item-name{color:var(--amber);}
+.kb-tag-active{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--amber);color:var(--amber);font-size:9px;padding:1px 6px;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;}
+.kb-tag-active button{background:none;border:none;color:var(--amber);cursor:pointer;font-size:11px;line-height:1;padding:0 0 0 2px;opacity:.6;}
+.kb-tag-active button:hover{opacity:1;}
+
 /* ─── Knowledge modal ────────────────────────────────────────────────────── */
 #kb-body{display:flex;flex:1;overflow:hidden;}
 #kb-filelist{width:200px;border-right:1px solid var(--border);overflow-y:auto;padding:6px 0;flex-shrink:0;}
@@ -297,6 +309,7 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
           <div id="draft-header">
             <span id="draft-label">&#9654; Draft</span>
             <button class="rbtn primary" id="btn-propose">Generate</button>
+            <button class="rbtn" id="btn-add-ctx" title="Add knowledge context">+ Context</button>
             <button class="rbtn" id="btn-copy">Copy</button>
             <button class="rbtn" id="btn-clear-resp">Clear</button>
           </div>
@@ -333,6 +346,23 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
   </div>
   <div id="pd-bar-wrap"><div id="pd-bar"></div></div>
   <div id="progress-log"></div>
+</div>
+
+<!-- ── Context picker modal ──────────────────────────────────────────────── -->
+<div id="ctx-modal" class="modal-overlay">
+  <div class="modal-box" style="width:500px;max-width:95vw;max-height:75vh;display:flex;flex-direction:column;">
+    <div class="modal-header">
+      <span class="m-title">&#9670; Add Context</span>
+      <button class="modal-close" data-close="ctx-modal">&#215;</button>
+    </div>
+    <div style="padding:8px 14px;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);flex-shrink:0;">
+      Files matching names found in this email are shown first. Click to toggle.
+    </div>
+    <div id="ctx-file-list" style="flex:1;overflow-y:auto;padding:8px 0;"></div>
+    <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
+      <button class="rbtn primary" id="btn-ctx-done">Done</button>
+    </div>
+  </div>
 </div>
 
 <!-- ── Knowledge modal ────────────────────────────────────────────────────── -->
@@ -484,7 +514,7 @@ let discoveredFolders=[];  // from IMAP discovery
 // ─── Theme ────────────────────────────────────────────────────────────────
 const html=document.documentElement,themeToggle=document.getElementById("theme-toggle");
 function applyTheme(t){html.setAttribute("data-theme",t);themeToggle.textContent=t==="dark"?"☀":"☾";localStorage.setItem("mail-theme",t);}
-applyTheme(localStorage.getItem("mail-theme")||"dark");
+applyTheme(localStorage.getItem("mail-theme")||"light");
 themeToggle.addEventListener("click",()=>applyTheme(html.getAttribute("data-theme")==="dark"?"light":"dark"));
 
 // ─── Modal helpers ────────────────────────────────────────────────────────
@@ -663,7 +693,7 @@ async function openEmail(id,el){
   if(el)el.classList.add("selected");
   emailBody.textContent="Loading…";emailBody.className="";
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
-  currentResponse="";kbTagsEl.style.display="none";
+  currentResponse="";activeCtxFiles=new Set();renderCtxTags();
   chatHistory=[];renderChatMessages();
   try{
     const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
@@ -700,12 +730,66 @@ const kbTagsEl=document.getElementById("kb-tags");
 const chatMessagesEl=document.getElementById("chat-messages");
 const chatInput=document.getElementById("chat-input");
 let chatHistory=[];   // [{role,content}] sent to backend
+let activeCtxFiles=new Set(); // filenames explicitly added by user
 
-function showKbTags(tags){
-  if(!tags||!tags.length){kbTagsEl.style.display="none";return;}
-  kbTagsEl.innerHTML=tags.map(t=>`<span class="kb-tag">${escHtml(t)}</span>`).join("");
+function renderCtxTags(){
+  if(!activeCtxFiles.size){kbTagsEl.style.display="none";return;}
+  kbTagsEl.innerHTML=[...activeCtxFiles].map(f=>{
+    const label=f.replace(".md","").replace(/_/g," ");
+    return `<span class="kb-tag-active">${escHtml(label)}<button data-f="${escHtml(f)}" title="Remove">&#215;</button></span>`;
+  }).join("");
   kbTagsEl.style.display="flex";
+  kbTagsEl.querySelectorAll("button[data-f]").forEach(btn=>{
+    btn.addEventListener("click",()=>{activeCtxFiles.delete(btn.dataset.f);renderCtxTags();});
+  });
 }
+
+// ─── Context picker ───────────────────────────────────────────────────────
+let allKbFiles=[];
+async function openCtxModal(){
+  if(!currentEmail){setStatus("Select an email first","err");return;}
+  // Fetch all KB files if not cached (refresh on open)
+  try{ allKbFiles=await fetch("/api/knowledge_files").then(r=>r.json()); }
+  catch(e){ setStatus("Could not load KB files","err");return; }
+
+  // Score relevance: extract capitalised words from current email
+  const emailText=`${currentEmail.subject||""} ${(currentEmail.body_text||"").slice(0,1500)}`;
+  const candidates=new Set((emailText.match(/\b[A-Z][a-zA-Z]{2,}\b/g)||[]).map(w=>w.toLowerCase()));
+  const stopwords=new Set(["the","this","that","from","dear","kind","best","with","your","please","thank","also","have","will","just","been","more","some","they"]);
+  candidates.forEach(w=>{if(stopwords.has(w))candidates.delete(w);});
+
+  function score(f){
+    const nameLower=f.name.toLowerCase().replace(".md","").replace(/_/g," ");
+    const head=(f.content||"").slice(0,400).toLowerCase();
+    let s=0;
+    candidates.forEach(c=>{if(nameLower.includes(c)||head.includes(c))s++;});
+    if(f.pinned)s+=0.1; // slight boost for pinned
+    return s;
+  }
+  const sorted=[...allKbFiles].sort((a,b)=>score(b)-score(a));
+
+  const list=document.getElementById("ctx-file-list");
+  list.innerHTML="";
+  sorted.forEach(f=>{
+    const s=score(f);
+    const item=document.createElement("div");
+    item.className="ctx-item"+(activeCtxFiles.has(f.name)?" selected":"");
+    item.innerHTML=`<input type="checkbox" ${activeCtxFiles.has(f.name)?"checked":""}><span class="ctx-item-name">${escHtml(f.name.replace(".md","").replace(/_/g," "))}</span>${s>0?`<span class="ctx-item-badge">match</span>`:""}`;
+    const cb=item.querySelector("input");
+    cb.addEventListener("change",()=>{
+      if(cb.checked){activeCtxFiles.add(f.name);item.classList.add("selected");}
+      else{activeCtxFiles.delete(f.name);item.classList.remove("selected");}
+    });
+    list.appendChild(item);
+  });
+
+  document.getElementById("ctx-modal").classList.add("open");
+}
+document.getElementById("btn-add-ctx").addEventListener("click",openCtxModal);
+document.getElementById("btn-ctx-done").addEventListener("click",()=>{
+  document.getElementById("ctx-modal").classList.remove("open");
+  renderCtxTags();
+});
 
 function renderChatMessages(){
   chatMessagesEl.innerHTML="";
@@ -770,7 +854,7 @@ async function sendChat(userText){
   chatMessagesEl.appendChild(pending);chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
   try{
     const data=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email:currentEmail,messages:chatHistory})}).then(r=>r.json());
+      body:JSON.stringify({email:currentEmail,messages:chatHistory,extra_kb:[...activeCtxFiles]})}).then(r=>r.json());
     chatMessagesEl.removeChild(pending);
     // Update draft panel if draft was provided
     if(data.draft){
@@ -781,7 +865,6 @@ async function sendChat(userText){
     if(data.chat) addChatMessage("assistant",data.chat);
     // KB save proposal
     if(data.kb_save) offerKbSave(data.kb_save);
-    showKbTags(data.knowledge_used);
     setStatus("Done","ok");
   }catch(err){
     chatMessagesEl.removeChild(pending);
@@ -1172,7 +1255,7 @@ document.getElementById("btn-propose").addEventListener("click",proposeResponse)
 document.getElementById("btn-copy").addEventListener("click",copyResponse);
 document.getElementById("btn-clear-resp").addEventListener("click",()=>{
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
-  currentResponse="";kbTagsEl.style.display="none";
+  currentResponse="";activeCtxFiles=new Set();renderCtxTags();
   chatHistory=[];renderChatMessages();
 });
 document.getElementById("btn-chat-send").addEventListener("click",()=>sendChat(chatInput.value));
