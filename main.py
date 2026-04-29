@@ -36,7 +36,6 @@ CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.json")
 DEFAULT_CONFIG = {
     "accounts": [],
     "lm_studio": {"base_url": "http://localhost:1234", "model": "local-model", "api_key": ""},
-    "whisper":   {"model": "base"},
     "app":       {"port": 5100},
 }
 
