@@ -119,13 +119,21 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 /* chat column */
 #chat-col{display:flex;flex-direction:column;flex:1;min-width:200px;overflow:hidden;background:var(--bg0);}
 #chat-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:7px 14px;font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);flex-shrink:0;}
-#chat-messages{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#chat-messages{flex:1;min-height:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
 .cm{display:flex;flex-direction:column;gap:2px;max-width:100%;}
 .cm-role{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);flex-shrink:0;}
 .cm.user .cm-role{color:var(--blue);text-align:right;}
 .cm.assistant .cm-role{color:var(--amber);}
-.cm-body{font-size:11.5px;line-height:1.65;color:var(--text);white-space:pre-wrap;word-break:break-word;}
-.cm.user .cm-body{background:var(--bg2);padding:7px 11px;border-radius:2px;text-align:right;}
+.cm-body{font-size:11.5px;line-height:1.65;color:var(--text);word-break:break-word;}
+.cm-body p{margin-bottom:6px;}.cm-body p:last-child{margin-bottom:0;}
+.cm-body ul,.cm-body ol{margin:4px 0 6px 18px;}.cm-body li{margin-bottom:2px;}
+.cm-body h1,.cm-body h2,.cm-body h3{color:var(--bright);margin:8px 0 4px;font-size:12.5px;}
+.cm-body code{background:var(--bg3);padding:1px 5px;font-family:var(--font);font-size:10.5px;}
+.cm-body pre{background:var(--bg3);padding:8px 10px;overflow-x:auto;margin:6px 0;}
+.cm-body pre code{background:none;padding:0;}
+.cm-body blockquote{border-left:3px solid var(--border2);margin:4px 0;padding-left:10px;color:var(--muted);}
+.cm-body strong{color:var(--bright);}
+.cm.user .cm-body{background:var(--bg2);padding:7px 11px;border-radius:2px;text-align:right;white-space:pre-wrap;}
 .cm.thinking .cm-body{color:var(--dim);font-style:italic;font-size:10.5px;}
 .cm.thinking .cm-role{color:var(--dim);}
 /* kb-save proposal bubble */
@@ -264,6 +272,7 @@ html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--
 #copy-toast.show{opacity:1;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -800,7 +809,8 @@ function renderChatMessages(){
   chatHistory.forEach(m=>{
     const div=document.createElement("div");
     div.className="cm "+(m.role==="user"?"user":"assistant");
-    div.innerHTML=`<div class="cm-role">${m.role==="user"?"You":"Assistant"}</div><div class="cm-body">${escHtml(m.content)}</div>`;
+    const body=m.role==="user"?escHtml(m.content):(typeof marked!=="undefined"?marked.parse(m.content):escHtml(m.content));
+    div.innerHTML=`<div class="cm-role">${m.role==="user"?"You":"Assistant"}</div><div class="cm-body">${body}</div>`;
     chatMessagesEl.appendChild(div);
   });
   chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
