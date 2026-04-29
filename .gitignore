@@ -29,5 +29,10 @@ build/
 *.swp
 *.swo
 
+# ── PyInstaller build artifacts ───────────────────────────────────────────────
+build/
+dist/
+*.spec.bak
+
 # ── Claude Code internal ──────────────────────────────────────────────────────
 .claude/

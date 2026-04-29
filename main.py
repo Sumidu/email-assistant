@@ -7,9 +7,13 @@ Then open: http://localhost:5100
 import json
 import os
 import re
+import sys
 import threading
 
 from flask import Flask, jsonify, render_template, request
+
+# Resolve base dir so templates are found both in dev and when frozen by PyInstaller
+_BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 
 from modules.imap_fetcher       import IMAPFetcher
 from modules.knowledge_builder  import KnowledgeBuilder
@@ -18,7 +22,15 @@ from modules                    import database
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+# When frozen, config.json lives next to the .app (not inside it)
+if getattr(sys, "frozen", False):
+    _CONFIG_DIR = os.path.dirname(sys.executable)  # .app/Contents/MacOS/
+    # Go up to sit beside the .app bundle itself
+    _CONFIG_DIR = os.path.abspath(os.path.join(_CONFIG_DIR, "..", "..", ".."))
+else:
+    _CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.json")
 
 DEFAULT_CONFIG = {
     "accounts": [],
@@ -87,7 +99,7 @@ _reload_modules()
 
 # ── Flask app ────────────────────────────────────────────────────────────────
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(_BASE_DIR, "templates"))
 
 _task_status: dict = {"running": False, "message": "Idle", "progress": []}
 
