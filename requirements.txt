@@ -1,0 +1,4 @@
+flask>=3.0
+requests>=2.31
+openai-whisper>=20231117
+urllib3<2

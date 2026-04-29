@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAIL — Local Email Assistant</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --amber:#e8a000;--green:#44dd88;--green2:#22aa66;--red:#ee4466;--blue:#44aaff;
+  --font:'SF Mono','Fira Code','Cascadia Code','Courier New',monospace;
+}
+[data-theme="dark"] {
+  --bg0:#0b0b0e;--bg1:#111115;--bg2:#18181f;--bg3:#202028;--bg4:#282833;
+  --border:#2a2a38;--border2:#383848;--dim:#404058;--muted:#606088;
+  --text:#c0c0dc;--bright:#e0e0f8;--input-bg:#1a1a24;--shadow:rgba(0,0,0,.6);
+}
+[data-theme="light"] {
+  --bg0:#f0f0f4;--bg1:#f8f8fc;--bg2:#ededf4;--bg3:#e4e4ee;--bg4:#d8d8e8;
+  --border:#d0d0de;--border2:#c0c0ce;--dim:#aaaabc;--muted:#7878a0;
+  --text:#303050;--bright:#18183a;--input-bg:#f4f4fa;--shadow:rgba(0,0,0,.18);
+  --green:#118855;--green2:#0d6640;--amber:#b87800;--red:#cc2244;--blue:#2266cc;
+}
+html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--font);font-size:12.5px;line-height:1.5;overflow:hidden;}
+
+/* ─── Layout ─────────────────────────────────────────────────────────────── */
+#app{display:grid;grid-template-rows:40px 1fr 26px;grid-template-columns:200px 300px 1fr;grid-template-areas:"header header header" "folders maillist main" "statusbar statusbar statusbar";height:100vh;}
+
+/* ─── Header ─────────────────────────────────────────────────────────────── */
+#header{grid-area:header;background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:10px;}
+.logo{color:var(--amber);font-size:13px;font-weight:bold;letter-spacing:5px;text-transform:uppercase;flex-shrink:0;margin-right:8px;}
+.logo span{color:var(--muted);font-weight:normal;letter-spacing:2px;font-size:10px;}
+#search-wrap{flex:1;max-width:340px;display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);padding:3px 10px;}
+#search-wrap .ico{color:var(--muted);font-size:11px;}
+#search-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);}
+#search-input::placeholder{color:var(--dim);}
+#header-actions{display:flex;gap:6px;margin-left:auto;align-items:center;}
+.hbtn{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font);font-size:10px;padding:4px 11px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:border-color .15s,color .15s,background .15s;}
+.hbtn:hover{border-color:var(--amber);color:var(--amber);background:rgba(232,160,0,.06);}
+.hbtn.accent{border-color:var(--amber);color:var(--amber);}
+#theme-toggle,#btn-settings{background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:14px;width:28px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .15s,color .15s;flex-shrink:0;}
+#theme-toggle:hover,#btn-settings:hover{border-color:var(--amber);color:var(--amber);}
+
+/* ─── Folder tree ────────────────────────────────────────────────────────── */
+#folders{grid-area:folders;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+#folders-header{padding:10px 14px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;display:flex;align-items:center;gap:6px;}
+#folder-list{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+.acct-header{display:flex;align-items:center;gap:6px;padding:8px 10px 5px;color:var(--muted);font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;border-bottom:1px solid var(--border);margin-top:4px;position:relative;}
+.acct-header:first-child{margin-top:0;}
+.acct-header .acct-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acct-header .acct-dot{width:6px;height:6px;border-radius:50%;background:var(--dim);flex-shrink:0;}
+.acct-sync-btn{background:transparent;border:none;color:var(--dim);font-size:13px;cursor:pointer;padding:0 2px;line-height:1;transition:color .12s;flex-shrink:0;opacity:0;}
+.acct-header:hover .acct-sync-btn{opacity:1;}
+.acct-sync-btn:hover{color:var(--amber);}
+.folder-item{display:flex;align-items:center;gap:7px;padding:5px 10px 5px 22px;cursor:pointer;color:var(--muted);font-size:11px;transition:color .12s,background .12s;position:relative;}
+.folder-item:hover{color:var(--text);background:var(--bg2);}
+.folder-item.selected{color:var(--bright);background:var(--bg3);}
+.folder-item.selected::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--amber);}
+.folder-item .f-ico{font-size:12px;flex-shrink:0;width:15px;text-align:center;}
+.folder-item .f-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.folder-item .f-count{font-size:9px;color:var(--dim);background:var(--bg4);padding:1px 4px;border-radius:8px;flex-shrink:0;}
+.folder-item.selected .f-count{color:var(--muted);}
+
+/* ─── Mail list ──────────────────────────────────────────────────────────── */
+#maillist{grid-area:maillist;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+#maillist-header{padding:9px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;}
+#maillist-title{color:var(--text);font-size:11px;font-weight:bold;letter-spacing:1px;flex:1;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#email-count{color:var(--dim);font-size:9.5px;flex-shrink:0;}
+#email-list{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+.email-item{padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .08s;position:relative;}
+.email-item:hover{background:var(--bg2);}
+.email-item.selected{background:var(--bg3);border-left:2px solid var(--amber);padding-left:12px;}
+.email-item .ei-from{color:var(--bright);font-size:11.5px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;}
+.email-item .ei-subj{color:var(--text);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;}
+.email-item .ei-meta{color:var(--dim);font-size:9.5px;display:flex;justify-content:space-between;}
+#load-more{padding:10px;text-align:center;color:var(--muted);font-size:10px;cursor:pointer;letter-spacing:1px;transition:color .12s;}
+#load-more:hover{color:var(--amber);}
+
+/* ─── Main area ──────────────────────────────────────────────────────────── */
+#main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;background:var(--bg0);}
+#panels{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#email-panel{display:flex;flex-direction:column;border-bottom:2px solid var(--border2);overflow:hidden;flex:1;min-height:120px;}
+#email-panel-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:flex-start;gap:14px;flex-shrink:0;}
+.meta-block{flex:1;min-width:0;}
+#email-subject{color:var(--bright);font-size:13.5px;font-weight:bold;margin-bottom:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#email-meta{color:var(--muted);font-size:10.5px;line-height:1.8;}
+#email-meta strong{color:var(--text);}
+#email-panel-actions{display:flex;gap:6px;align-items:flex-start;flex-shrink:0;}
+#kb-tags{display:none;background:var(--bg1);border-bottom:1px solid var(--border);padding:4px 16px;gap:5px;align-items:center;flex-wrap:wrap;flex-shrink:0;}
+.kb-tag{background:var(--bg3);border:1px solid var(--border2);color:var(--muted);font-size:9px;padding:1px 7px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
+#email-body{flex:1;overflow-y:auto;padding:18px 22px;font-size:12.5px;line-height:1.75;color:var(--text);scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#email-body.plain{white-space:pre-wrap;}
+#email-body.html-view{white-space:normal;}
+#email-body.html-view a{color:var(--amber);text-decoration:underline;}
+#email-body.html-view blockquote{border-left:3px solid var(--border2);margin:6px 0;padding-left:12px;color:var(--muted);}
+#email-body.html-view img{max-width:100%;height:auto;}
+#email-body.html-view p,#email-body.html-view div{margin-bottom:4px;}
+#email-body.placeholder{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;white-space:normal;}
+
+/* ─── Response panel ─────────────────────────────────────────────────────── */
+#response-panel{display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:120px;background:var(--bg0);}
+#response-panel-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+#rph-label{color:var(--amber);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;flex:1;}
+#response-actions{display:flex;gap:6px;align-items:center;}
+.rbtn{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font);font-size:9.5px;padding:3px 9px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .12s;}
+.rbtn:hover{border-color:var(--amber);color:var(--amber);}
+.rbtn.primary{border-color:var(--amber);color:var(--amber);background:rgba(232,160,0,.08);}
+.rbtn.primary:hover{background:rgba(232,160,0,.15);}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+#response-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#instruction-bar{background:var(--bg1);border-bottom:1px solid var(--border);padding:6px 14px;display:flex;gap:8px;align-items:flex-end;flex-shrink:0;}
+#instruction-bar .prompt{color:var(--green2);font-size:11px;flex-shrink:0;padding-bottom:2px;}
+#instruction-input{flex:1;background:transparent;border:none;outline:none;color:var(--bright);font-family:var(--font);font-size:11.5px;caret-color:var(--amber);resize:none;min-height:22px;max-height:120px;line-height:1.55;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#instruction-input::placeholder{color:var(--dim);}
+.run-btn{background:transparent;border:1px solid var(--dim);color:var(--dim);font-family:var(--font);font-size:9.5px;padding:2px 8px;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:all .12s;flex-shrink:0;margin-bottom:2px;}
+.run-btn:hover{border-color:var(--amber);color:var(--amber);}
+#response-text{flex:1;overflow-y:auto;padding:16px 22px;white-space:pre-wrap;font-size:12.5px;line-height:1.75;color:var(--green);scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#response-text.placeholder{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;}
+#response-text.loading{color:var(--amber);}
+
+/* ─── Status bar ─────────────────────────────────────────────────────────── */
+#statusbar{grid-area:statusbar;background:var(--bg2);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:14px;font-size:9.5px;color:var(--dim);letter-spacing:.5px;}
+.sb-seg{display:flex;align-items:center;gap:5px;}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--dim);flex-shrink:0;}
+.sb-dot.green{background:var(--green);}
+.sb-dot.amber{background:var(--amber);animation:pulse 1s infinite;}
+.sb-dot.red{background:var(--red);}
+#status-msg{flex:1;}
+.sb-sep{color:var(--border2);}
+
+/* ─── Progress drawer ────────────────────────────────────────────────────── */
+#progress-drawer{
+  position:fixed;bottom:26px;right:0;width:380px;
+  background:var(--bg2);border:1px solid var(--border2);border-right:none;border-bottom:none;
+  z-index:50;display:none;flex-direction:column;max-height:260px;
+}
+#progress-drawer.open{display:flex;}
+#progress-drawer-header{
+  background:var(--bg3);border-bottom:1px solid var(--border);
+  padding:6px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0;
+}
+#progress-drawer-header .pd-title{color:var(--amber);font-size:9.5px;letter-spacing:2px;text-transform:uppercase;flex:1;}
+#pd-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;}
+#pd-close:hover{color:var(--red);}
+#progress-log{flex:1;overflow-y:auto;padding:8px 12px;font-size:10.5px;line-height:1.7;color:var(--muted);scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+#progress-log .pl-line{padding:1px 0;}
+#progress-log .pl-line.latest{color:var(--text);}
+#pd-bar-wrap{height:3px;background:var(--bg4);flex-shrink:0;}
+#pd-bar{height:100%;background:var(--amber);width:0%;transition:width .4s;}
+
+/* ─── Modal base ─────────────────────────────────────────────────────────── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal-box{background:var(--bg1);border:1px solid var(--border2);box-shadow:0 24px 80px var(--shadow);display:flex;flex-direction:column;}
+.modal-header{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.modal-header .m-title{color:var(--amber);font-size:10px;letter-spacing:2.5px;text-transform:uppercase;flex:1;}
+.modal-close{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;font-family:var(--font);line-height:1;}
+.modal-close:hover{color:var(--red);}
+
+/* ─── Knowledge modal ────────────────────────────────────────────────────── */
+#kb-body{display:flex;flex:1;overflow:hidden;}
+#kb-filelist{width:200px;border-right:1px solid var(--border);overflow-y:auto;padding:6px 0;flex-shrink:0;}
+.kb-file-item{padding:6px 10px;cursor:pointer;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .1s,background .1s;display:flex;align-items:center;gap:6px;}
+.kb-file-item:hover{color:var(--text);background:var(--bg2);}
+.kb-file-item.active{color:var(--amber);background:var(--bg3);}
+.kb-file-item .kf-pin{background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0 1px;flex-shrink:0;opacity:0;transition:color .1s;line-height:1;}
+.kb-file-item:hover .kf-pin{opacity:1;}
+.kb-file-item.pinned .kf-pin{opacity:1;color:var(--amber);}
+.kb-file-item .kf-pin:hover{color:var(--amber);}
+.kb-file-item .kf-del{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;margin-left:2px;padding:0 2px;flex-shrink:0;opacity:0;transition:color .1s;}
+.kb-file-item:hover .kf-del{opacity:1;}
+.kb-file-item .kf-del:hover{color:var(--red);}
+.kb-pin-legend{padding:6px 10px 2px;font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);margin-bottom:2px;}
+#kb-new-btn{width:100%;background:transparent;border:none;border-top:1px solid var(--border);color:var(--muted);font-family:var(--font);font-size:10px;padding:8px 10px;cursor:pointer;text-align:left;transition:color .1s;}
+#kb-new-btn:hover{color:var(--green);}
+#kb-right{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#kb-view-mode{flex:1;overflow-y:auto;padding:18px 22px;font-size:11.5px;line-height:1.75;color:var(--text);white-space:pre-wrap;}
+#kb-edit-mode{flex:1;display:none;flex-direction:column;}
+#kb-edit-filename{background:var(--input-bg);border:none;border-bottom:1px solid var(--border);color:var(--bright);font-family:var(--font);font-size:12px;padding:8px 18px;outline:none;width:100%;flex-shrink:0;}
+#kb-edit-content{flex:1;resize:none;background:var(--bg0);border:none;outline:none;color:var(--green);font-family:var(--font);font-size:12px;line-height:1.75;padding:14px 18px;width:100%;}
+#kb-edit-actions{background:var(--bg2);border-top:1px solid var(--border);padding:8px 18px;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;}
+
+/* ─── Settings modal ─────────────────────────────────────────────────────── */
+.settings-body{padding:20px 24px;overflow-y:auto;max-height:70vh;}
+.tab-nav{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px;}
+.tab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--font);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;padding:6px 14px;cursor:pointer;transition:color .12s,border-color .12s;margin-bottom:-1px;}
+.tab-btn:hover{color:var(--text);}
+.tab-btn.active{color:var(--amber);border-bottom-color:var(--amber);}
+.tab-pane{display:none;}
+.tab-pane.active{display:block;}
+.field-group{margin-bottom:14px;}
+.field-group label{display:block;color:var(--muted);font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px;}
+.field-group input,.field-group select{width:100%;background:var(--input-bg);border:1px solid var(--border2);color:var(--bright);font-family:var(--font);font-size:12px;padding:6px 10px;outline:none;transition:border-color .12s;appearance:none;}
+.field-group input:focus,.field-group select:focus{border-color:var(--amber);}
+.field-group input::placeholder{color:var(--dim);}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.field-hint{color:var(--dim);font-size:9.5px;margin-top:4px;}
+.section-label{color:var(--amber);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.settings-footer{border-top:1px solid var(--border);padding:12px 24px;display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-shrink:0;}
+.sbtn{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font);font-size:10px;padding:5px 16px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .12s;}
+.sbtn:hover{border-color:var(--text);color:var(--text);}
+.sbtn.primary{border-color:var(--amber);color:var(--amber);background:rgba(232,160,0,.08);}
+.sbtn.primary:hover{background:rgba(232,160,0,.18);}
+#settings-save-msg{flex:1;font-size:10px;color:var(--green);display:none;}
+
+/* Accounts list */
+.acct-list-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.acct-list-item:last-child{border-bottom:none;}
+.acct-list-info{flex:1;min-width:0;}
+.acct-list-name{color:var(--bright);font-size:11.5px;font-weight:bold;}
+.acct-list-user{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acct-list-actions{display:flex;gap:6px;flex-shrink:0;}
+.icon-btn{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font);font-size:10px;padding:3px 8px;cursor:pointer;transition:all .12s;}
+.icon-btn:hover{border-color:var(--amber);color:var(--amber);}
+.icon-btn.del:hover{border-color:var(--red);color:var(--red);}
+
+/* Folder picker */
+#folder-picker-list{max-height:220px;overflow-y:auto;border:1px solid var(--border);padding:4px 0;margin-top:8px;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
+.fp-item{display:flex;align-items:center;gap:10px;padding:5px 10px;font-size:11px;}
+.fp-item:hover{background:var(--bg2);}
+.fp-item input[type=checkbox]{accent-color:var(--amber);width:13px;height:13px;flex-shrink:0;cursor:pointer;}
+.fp-item .fp-name{flex:1;color:var(--text);}
+.fp-item .fp-role{font-size:9.5px;padding:1px 6px;border:1px solid var(--border2);color:var(--muted);}
+.fp-item .fp-role.inbox{border-color:var(--blue);color:var(--blue);}
+.fp-item .fp-role.sent{border-color:var(--green);color:var(--green);}
+#folder-picker-status{font-size:10px;color:var(--muted);margin-top:6px;}
+#btn-discover-folders{margin-top:12px;}
+
+/* ─── Copy toast ─────────────────────────────────────────────────────────── */
+#copy-toast{position:fixed;bottom:38px;right:18px;background:var(--amber);color:#000;font-size:10px;padding:5px 14px;letter-spacing:1.5px;text-transform:uppercase;font-family:var(--font);font-weight:bold;opacity:0;pointer-events:none;transition:opacity .2s;}
+#copy-toast.show{opacity:1;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="header">
+    <div class="logo">Mail<span> // local</span></div>
+    <div id="search-wrap"><span class="ico">&#128269;</span><input id="search-input" type="text" placeholder="Search subject / sender…" autocomplete="off"/></div>
+    <div id="header-actions">
+      <button class="hbtn accent" id="btn-sync">&#8635; Sync All</button>
+      <button class="hbtn" id="btn-build-kb">&#9670; Knowledge</button>
+      <button class="hbtn" id="btn-view-kb">&#128196; View KB</button>
+      <button id="btn-settings" title="Settings">&#9881;</button>
+      <button id="theme-toggle" title="Toggle light/dark">&#9790;</button>
+    </div>
+  </header>
+
+  <nav id="folders">
+    <div id="folders-header"><span>&#128193;</span><span>Folders</span></div>
+    <div id="folder-list"><div style="color:var(--dim);padding:14px;font-size:10px;text-align:center;line-height:1.8;">Add an account in Settings.</div></div>
+  </nav>
+
+  <section id="maillist">
+    <div id="maillist-header"><span id="maillist-title">Inbox</span><span id="email-count">—</span></div>
+    <div id="email-list"><div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Select a folder.</div></div>
+    <div id="load-more" style="display:none;">&#8227; Load more…</div>
+  </section>
+
+  <main id="main">
+    <div id="panels">
+      <div id="email-panel">
+        <div id="email-panel-header">
+          <div class="meta-block">
+            <div id="email-subject" style="color:var(--dim);">No message selected</div>
+            <div id="email-meta"></div>
+          </div>
+          <div id="email-panel-actions"></div>
+        </div>
+        <div id="email-body" class="placeholder">Select a message</div>
+      </div>
+
+      <div id="response-panel">
+        <div id="response-panel-header">
+          <span id="rph-label">&#9654; Proposed Response</span>
+          <div id="response-actions">
+            <button class="rbtn primary" id="btn-propose">Generate</button>
+            <button class="rbtn" id="btn-copy">Copy</button>
+            <button class="rbtn" id="btn-clear-resp">Clear</button>
+          </div>
+        </div>
+        <div id="kb-tags"></div>
+        <div id="response-area">
+          <div id="instruction-bar">
+            <span class="prompt">&gt;</span>
+            <textarea id="instruction-input" rows="1" placeholder="Instruction — e.g. 'keep it short and politely decline'…" autocomplete="off"></textarea>
+            <button class="run-btn" id="btn-run-instruction">Run</button>
+          </div>
+          <div id="response-text" class="placeholder">Generate a response or give an instruction above</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer id="statusbar">
+    <div class="sb-seg"><div class="sb-dot" id="status-dot"></div><span id="status-msg">Ready</span></div>
+    <span class="sb-sep">|</span>
+    <div class="sb-seg" style="margin-left:auto;"><span id="status-model" style="color:var(--dim);">LM Studio…</span></div>
+  </footer>
+</div>
+
+<!-- ── Progress drawer ────────────────────────────────────────────────────── -->
+<div id="progress-drawer">
+  <div id="progress-drawer-header">
+    <span class="pd-title">&#9670; Task Progress</span>
+    <button id="pd-close">&#215;</button>
+  </div>
+  <div id="pd-bar-wrap"><div id="pd-bar"></div></div>
+  <div id="progress-log"></div>
+</div>
+
+<!-- ── Knowledge modal ────────────────────────────────────────────────────── -->
+<div id="kb-modal" class="modal-overlay">
+  <div class="modal-box" style="width:860px;max-width:95vw;height:84vh;">
+    <div class="modal-header">
+      <span class="m-title">Knowledge Base</span>
+      <button class="modal-close" data-close="kb-modal">&#215;</button>
+    </div>
+    <div id="kb-body">
+      <div style="display:flex;flex-direction:column;width:200px;border-right:1px solid var(--border);flex-shrink:0;">
+        <div id="kb-filelist" style="flex:1;overflow-y:auto;padding:6px 0;"></div>
+        <button id="kb-new-btn">+ New entry</button>
+        <button id="kb-purge-btn" style="width:100%;background:transparent;border:none;border-top:1px solid var(--border);color:var(--dim);font-family:var(--font);font-size:10px;padding:7px 10px;cursor:pointer;text-align:left;transition:color .1s;" title="Delete all auto-generated contact profiles">&#128465; Purge contacts</button>
+      </div>
+      <div id="kb-right">
+        <div id="kb-view-toolbar" style="display:none;background:var(--bg2);border-bottom:1px solid var(--border);padding:6px 14px;flex-shrink:0;gap:6px;align-items:center;">
+          <span id="kb-view-filename" style="flex:1;font-size:10.5px;color:var(--muted);"></span>
+          <button class="rbtn" id="kb-pin-btn" title="Always include in prompts">&#9670; Pin</button>
+          <button class="rbtn" id="kb-edit-btn">Edit</button>
+        </div>
+        <pre id="kb-view-mode" style="color:var(--dim);flex:1;overflow-y:auto;padding:18px 22px;white-space:pre-wrap;font-size:11.5px;line-height:1.75;margin:0;">Select a file.</pre>
+        <div id="kb-edit-mode">
+          <input id="kb-edit-filename" type="text" placeholder="filename (e.g. about_me)" autocomplete="off"/>
+          <textarea id="kb-edit-content" placeholder="Write markdown here…" spellcheck="false"></textarea>
+          <div id="kb-edit-actions">
+            <button class="rbtn" id="kb-cancel-edit">Cancel</button>
+            <button class="rbtn primary" id="kb-save-edit">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings modal ─────────────────────────────────────────────────────── -->
+<div id="settings-modal" class="modal-overlay">
+  <div class="modal-box" style="width:600px;max-width:95vw;">
+    <div class="modal-header"><span class="m-title">Settings</span><button class="modal-close" data-close="settings-modal">&#215;</button></div>
+    <div class="settings-body">
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="tab-accounts">Accounts</button>
+        <button class="tab-btn" data-tab="tab-acct-edit">Account Details</button>
+        <button class="tab-btn" data-tab="tab-lm">AI Provider</button>
+      </div>
+
+      <!-- Accounts list -->
+      <div id="tab-accounts" class="tab-pane active">
+        <div class="section-label">Email Accounts</div>
+        <div id="acct-list-container"><div style="color:var(--dim);font-size:11px;padding:8px 0;">No accounts configured yet.</div></div>
+        <button class="sbtn primary" id="add-account-btn" style="margin-top:14px;width:100%;">+ Add Account</button>
+      </div>
+
+      <!-- Account edit -->
+      <div id="tab-acct-edit" class="tab-pane">
+        <div class="section-label" id="acct-edit-label">New Account</div>
+        <input type="hidden" id="cfg-acct-id"/>
+        <div class="field-group">
+          <label>Display Name</label>
+          <!-- Dummy hidden fields trick browser's credential autofill heuristic -->
+          <input type="text" style="display:none" aria-hidden="true"/>
+          <input id="cfg-acct-name" type="text" placeholder="e.g. Work, Personal" autocomplete="off"/>
+        </div>
+        <div class="section-label" style="margin-top:14px;">IMAP Connection</div>
+        <div class="field-row">
+          <div class="field-group">
+            <label>Server</label>
+            <input id="cfg-imap-server" type="text" placeholder="outlook.office365.com" autocomplete="off"/>
+          </div>
+          <div class="field-group">
+            <label>Port</label>
+            <input id="cfg-imap-port" type="number" placeholder="993" autocomplete="off"/>
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Username / Email</label>
+          <input id="cfg-imap-username" type="text" placeholder="you@domain.com" autocomplete="off"/>
+        </div>
+        <div class="field-group">
+          <label>Password / App Password</label>
+          <input id="cfg-imap-password" type="password" placeholder="••••••••" autocomplete="new-password"/>
+          <div class="field-hint">Outlook with MFA: use an App Password from Microsoft account security settings.</div>
+        </div>
+        <div class="field-group">
+          <label>Fetch Limit (emails per folder)</label>
+          <input id="cfg-imap-limit" type="number" placeholder="300" autocomplete="off"/>
+        </div>
+
+        <!-- Folder picker -->
+        <div class="section-label" style="margin-top:14px;">Sync Folders</div>
+        <div class="field-hint" style="margin-bottom:8px;">Select which folders to sync and mark their role.</div>
+        <button class="sbtn" id="btn-discover-folders">&#128269; Discover Folders from Server</button>
+        <div id="folder-picker-status"></div>
+        <div id="folder-picker-list" style="display:none;"></div>
+      </div>
+
+      <!-- AI Provider -->
+      <div id="tab-lm" class="tab-pane">
+        <div class="section-label">AI Provider (OpenAI-compatible)</div>
+        <div class="field-group">
+          <label>Preset</label>
+          <select id="cfg-lm-preset" autocomplete="off">
+            <option value="">— custom —</option>
+            <option value="lmstudio">LM Studio (local)</option>
+            <option value="litellm">LiteLLM proxy (local)</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (via LiteLLM)</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Base URL</label>
+          <input id="cfg-lm-url" type="text" placeholder="http://localhost:1234" autocomplete="off"/>
+        </div>
+        <div class="field-group">
+          <label>Model Name</label>
+          <input id="cfg-lm-model" type="text" placeholder="local-model" autocomplete="off"/>
+          <div class="field-hint">LM Studio: any string when one model loaded. LiteLLM/OpenAI: exact model ID (e.g. gpt-4o, claude-3-5-sonnet-20241022).</div>
+        </div>
+        <div class="field-group">
+          <label>API Key <span style="color:var(--dim);font-size:9px;">(leave blank for local providers)</span></label>
+          <input id="cfg-lm-apikey" type="password" placeholder="sk-…" autocomplete="new-password"/>
+        </div>
+      </div>
+
+    </div>
+    <div class="settings-footer">
+      <span id="settings-save-msg">&#10003; Saved</span>
+      <button class="sbtn" id="btn-acct-back" style="display:none;" data-back="tab-accounts">&#8592; Back</button>
+      <button class="sbtn" data-close="settings-modal">Close</button>
+      <button class="sbtn primary" id="btn-save-settings">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="copy-toast">Copied</div>
+
+<script>
+(function(){
+"use strict";
+
+// ─── State ────────────────────────────────────────────────────────────────
+let currentEmail=null,currentResponse="",currentFolder=null,currentAccountId=null;
+let emailOffset=0;const PAGE_SIZE=60;
+let allEmailsLocal=[];
+let taskPollInterval=null,searchTimer=null,accountsCache=[];
+let discoveredFolders=[];  // from IMAP discovery
+
+// ─── Theme ────────────────────────────────────────────────────────────────
+const html=document.documentElement,themeToggle=document.getElementById("theme-toggle");
+function applyTheme(t){html.setAttribute("data-theme",t);themeToggle.textContent=t==="dark"?"☀":"☾";localStorage.setItem("mail-theme",t);}
+applyTheme(localStorage.getItem("mail-theme")||"dark");
+themeToggle.addEventListener("click",()=>applyTheme(html.getAttribute("data-theme")==="dark"?"light":"dark"));
+
+// ─── Modal helpers ────────────────────────────────────────────────────────
+function openModal(id){document.getElementById(id).classList.add("open");}
+function closeModal(id){document.getElementById(id).classList.remove("open");}
+document.querySelectorAll(".modal-close,[data-close]").forEach(el=>{
+  el.addEventListener("click",()=>closeModal(el.dataset.close||el.closest(".modal-overlay").id));
+});
+document.querySelectorAll(".modal-overlay").forEach(o=>{
+  o.addEventListener("click",e=>{if(e.target===o)o.classList.remove("open");});
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape")document.querySelectorAll(".modal-overlay.open").forEach(m=>m.classList.remove("open"));
+});
+
+// ─── Tab nav ──────────────────────────────────────────────────────────────
+function switchTab(tabId){
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===tabId));
+  document.querySelectorAll(".tab-pane").forEach(p=>p.classList.toggle("active",p.id===tabId));
+}
+document.querySelectorAll(".tab-btn").forEach(btn=>btn.addEventListener("click",()=>switchTab(btn.dataset.tab)));
+
+function settingsFooterMode(mode){
+  const back=document.getElementById("btn-acct-back");
+  const save=document.getElementById("btn-save-settings");
+  back.style.display=mode==="edit"||mode==="new"?"":"none";
+  save.textContent=mode==="new"?"Add Account":mode==="edit"?"Save Account":"Save";
+}
+
+// ─── Status ───────────────────────────────────────────────────────────────
+const statusDot=document.getElementById("status-dot"),statusMsg=document.getElementById("status-msg"),statusModel=document.getElementById("status-model");
+function setStatus(msg,state="idle"){
+  statusMsg.textContent=msg;
+  statusDot.className="sb-dot"+(state==="busy"?" amber":state==="ok"?" green":state==="err"?" red":"");
+}
+
+// ─── Progress drawer ──────────────────────────────────────────────────────
+const progressDrawer=document.getElementById("progress-drawer");
+const progressLog=document.getElementById("progress-log");
+const pdBar=document.getElementById("pd-bar");
+document.getElementById("pd-close").addEventListener("click",()=>progressDrawer.classList.remove("open"));
+
+function showProgress(lines,progressPct){
+  progressDrawer.classList.add("open");
+  progressLog.innerHTML=lines.map((l,i)=>`<div class="pl-line${i===lines.length-1?" latest":""}">${escHtml(l)}</div>`).join("");
+  progressLog.scrollTop=progressLog.scrollHeight;
+  pdBar.style.width=progressPct+"%";
+}
+function hideProgress(){progressDrawer.classList.remove("open");pdBar.style.width="0%";}
+
+// ─── Task polling ─────────────────────────────────────────────────────────
+let totalExpected=0;
+function startTaskPoll(label,expectedSteps,onDone){
+  totalExpected=expectedSteps||0;
+  setStatus(label+"…","busy");
+  progressLog.innerHTML="";
+  progressDrawer.classList.add("open");
+  clearInterval(taskPollInterval);
+  taskPollInterval=setInterval(async()=>{
+    const s=await fetch("/api/task_status").then(r=>r.json());
+    const lines=s.progress||[];
+    const pct=totalExpected>0?Math.min(99,Math.round(lines.length/totalExpected*100)):0;
+    if(lines.length)showProgress(lines,pct);
+    if(s.message)setStatus(s.message,"busy");
+    if(!s.running){
+      clearInterval(taskPollInterval);taskPollInterval=null;
+      const ok=s.result&&s.result.success!==false;
+      setStatus(ok?"Done — "+label:"Error: "+(s.result?.error||"?"),ok?"ok":"err");
+      showProgress(lines,100);
+      setTimeout(hideProgress,4000);
+      if(onDone)onDone(s.result);
+    }
+  },800);
+}
+
+// ─── Folder helpers ───────────────────────────────────────────────────────
+const FOLDER_ICONS={inbox:"📬",sent:"📤",drafts:"📝",trash:"🗑",deleted:"🗑",junk:"⚠",spam:"⚠",archive:"🗄",starred:"★",flagged:"⚑"};
+function folderIcon(n){const k=n.toLowerCase();for(const[key,ico]of Object.entries(FOLDER_ICONS))if(k.includes(key))return ico;return"📁";}
+function folderDisplayName(n){return n.replace(/^(inbox[./])/i,"").trim()||n;}
+
+// ─── Load folders ─────────────────────────────────────────────────────────
+const folderListEl=document.getElementById("folder-list"),maillistTitle=document.getElementById("maillist-title");
+const emailCount=document.getElementById("email-count"),emailListEl=document.getElementById("email-list"),loadMoreBtn=document.getElementById("load-more");
+const searchInput=document.getElementById("search-input");
+
+async function loadFolders(){
+  try{
+    const[folders,accounts]=await Promise.all([
+      fetch("/api/folders").then(r=>r.json()),
+      fetch("/api/accounts").then(r=>r.json()),
+    ]);
+    accountsCache=accounts;
+    if(!accounts.length){
+      folderListEl.innerHTML='<div style="color:var(--dim);padding:14px;font-size:10px;text-align:center;line-height:1.8;">No accounts.<br>Open Settings to add one.</div>';
+      return;
+    }
+    const byAccount={};
+    for(const f of folders){const aid=f.account_id||"default";if(!byAccount[aid])byAccount[aid]=[];byAccount[aid].push(f);}
+    let h="";
+    for(const acct of accounts){
+      const aid=acct.id,acctFolders=byAccount[aid]||[];
+      h+=`<div class="acct-header"><span class="acct-dot"></span><span class="acct-name">${escHtml(acct.name)}</span><button class="acct-sync-btn" data-account-id="${escHtml(aid)}" title="Sync ${escHtml(acct.name)}">&#8635;</button></div>`;
+      if(!acctFolders.length)h+=`<div style="padding:5px 22px;color:var(--dim);font-size:10px;">No emails — sync first</div>`;
+      else for(const f of acctFolders)h+=`<div class="folder-item" data-folder="${escHtml(f.folder)}" data-account-id="${escHtml(aid)}"><span class="f-ico">${folderIcon(f.folder)}</span><span class="f-name">${escHtml(folderDisplayName(f.folder))}</span><span class="f-count">${f.count}</span></div>`;
+    }
+    folderListEl.innerHTML=h;
+    folderListEl.querySelectorAll(".folder-item").forEach(el=>el.addEventListener("click",()=>selectFolder(el.dataset.folder,el.dataset.accountId,el)));
+    folderListEl.querySelectorAll(".acct-sync-btn").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();syncAccount(btn.dataset.accountId);}));
+    if(currentFolder&&currentAccountId){
+      const match=folderListEl.querySelector(`.folder-item[data-folder="${CSS.escape(currentFolder)}"][data-account-id="${CSS.escape(currentAccountId)}"]`);
+      if(match)match.classList.add("selected");
+    }else{const first=folderListEl.querySelector(".folder-item");if(first)first.click();}
+  }catch(err){setStatus("Error loading folders: "+err.message,"err");}
+}
+
+function selectFolder(folder,accountId,el){
+  document.querySelectorAll(".folder-item").forEach(x=>x.classList.remove("selected"));
+  if(el)el.classList.add("selected");
+  currentFolder=folder;currentAccountId=accountId;emailOffset=0;
+  maillistTitle.textContent=folderDisplayName(folder).toUpperCase();
+  searchInput.value="";loadEmailList();
+}
+
+function syncAccount(accountId){
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const acct=accountsCache.find(a=>a.id===accountId);
+  const label=acct?"Sync "+acct.name:"Sync";
+  const folders=(acct?.imap?.sync_folders||[]).length||(acct?2:2);
+  fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_id:accountId})})
+    .then(()=>startTaskPoll(label,folders*3,()=>loadFolders()))
+    .catch(err=>setStatus("Sync error: "+err.message,"err"));
+}
+
+// ─── Email list ───────────────────────────────────────────────────────────
+async function loadEmailList(append=false){
+  if(!currentFolder)return;
+  try{
+    const url=`/api/emails?limit=${PAGE_SIZE}&offset=${emailOffset}&folder=${encodeURIComponent(currentFolder)}&account_id=${encodeURIComponent(currentAccountId||"")}`;
+    const emails=await fetch(url).then(r=>r.json());
+    if(!append)allEmailsLocal=emails;else allEmailsLocal=allEmailsLocal.concat(emails);
+    emailCount.textContent=allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length;
+    renderEmailList(allEmailsLocal,append);
+    loadMoreBtn.style.display=emails.length>=PAGE_SIZE?"block":"none";
+  }catch(err){setStatus("Error: "+err.message,"err");}
+}
+
+function renderEmailList(emails,append=false){
+  if(!append){
+    if(!emails.length){emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">No messages.</div>';return;}
+    emailListEl.innerHTML="";
+  }
+  emails.forEach(e=>{
+    const div=document.createElement("div");div.className="email-item";div.dataset.id=e.id;
+    div.innerHTML=`<div class="ei-from">${escHtml(extractName(e.sender||""))}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span></div>`;
+    div.addEventListener("click",()=>openEmail(e.id,div));
+    emailListEl.appendChild(div);
+  });
+}
+
+searchInput.addEventListener("input",()=>{
+  clearTimeout(searchTimer);
+  searchTimer=setTimeout(()=>{
+    const q=searchInput.value.trim().toLowerCase();
+    if(!q){renderEmailList(allEmailsLocal);emailCount.textContent=allEmailsLocal.length;return;}
+    const f=allEmailsLocal.filter(e=>(e.subject||"").toLowerCase().includes(q)||(e.sender||"").toLowerCase().includes(q));
+    renderEmailList(f);emailCount.textContent=f.length+" found";
+  },220);
+});
+
+// ─── Open email ───────────────────────────────────────────────────────────
+const emailSubject=document.getElementById("email-subject"),emailMeta=document.getElementById("email-meta");
+const emailBody=document.getElementById("email-body"),responseText=document.getElementById("response-text");
+const instrInput=document.getElementById("instruction-input");
+
+async function openEmail(id,el){
+  document.querySelectorAll(".email-item").forEach(x=>x.classList.remove("selected"));
+  if(el)el.classList.add("selected");
+  emailBody.textContent="Loading…";emailBody.className="";
+  responseText.textContent="Generate a response or give an instruction above";responseText.className="placeholder";
+  currentResponse="";kbTagsEl.style.display="none";
+  try{
+    const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
+    if(data.error){emailBody.textContent="Error: "+data.error;return;}
+    currentEmail=data;
+    emailSubject.textContent=data.subject||"(no subject)";emailSubject.style.color="";
+    emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
+    const html=(data.body_html||"").trim();
+    const text=(data.body_text||"").trim();
+    if(html){
+      emailBody.className="html-view";
+      const shadow=emailBody.attachShadow?null:null; // no shadow DOM, just iframe-less render
+      emailBody.innerHTML=sanitizeEmailHtml(html);
+    }else{
+      emailBody.className="plain";emailBody.textContent=text||"[No body]";
+    }
+  }catch(err){emailBody.textContent="Error: "+err.message;setStatus("Error fetching email","err");}
+}
+
+function sanitizeEmailHtml(raw){
+  // Strip scripts, on* handlers, external tracking pixels; keep layout/text
+  let h=raw
+    .replace(/<script[\s\S]*?<\/script>/gi,"")
+    .replace(/<style[\s\S]*?<\/style>/gi,"")
+    .replace(/\son\w+\s*=\s*(['"])[^'"]*\1/gi,"")
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi,"")
+    .replace(/<img[^>]+src=['"]https?:\/\/[^'"]*track[^'"]*['"][^>]*>/gi,"")
+    .replace(/javascript:/gi,"");
+  return h;
+}
+
+// ─── Response ─────────────────────────────────────────────────────────────
+const kbTagsEl=document.getElementById("kb-tags");
+function showKbTags(tags){
+  if(!tags||!tags.length){kbTagsEl.style.display="none";return;}
+  kbTagsEl.innerHTML=tags.map(t=>`<span class="kb-tag">${escHtml(t)}</span>`).join("");
+  kbTagsEl.style.display="flex";
+}
+
+async function proposeResponse(){
+  if(!currentEmail){setStatus("Select an email first","err");return;}
+  responseText.textContent="Generating…";responseText.className="loading";setStatus("Calling LM Studio…","busy");
+  kbTagsEl.style.display="none";
+  try{
+    const data=await fetch("/api/propose_response",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:currentEmail})}).then(r=>r.json());
+    currentResponse=data.response||"";responseText.textContent=currentResponse;responseText.className="";
+    showKbTags(data.knowledge_used);setStatus("Response generated","ok");
+  }catch(err){responseText.textContent="Error: "+err.message;responseText.className="";setStatus("LM Studio error: "+err.message,"err");}
+}
+
+async function runInstruction(instruction){
+  if(!currentEmail){setStatus("Select an email first","err");return;}
+  if(!instruction.trim()){setStatus("Enter an instruction","err");return;}
+  responseText.textContent="Processing…";responseText.className="loading";setStatus("Applying instruction…","busy");
+  try{
+    const data=await fetch("/api/generate_with_instruction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:currentEmail,instruction,current_response:currentResponse})}).then(r=>r.json());
+    currentResponse=data.response||"";responseText.textContent=currentResponse;responseText.className="";
+    showKbTags(data.knowledge_used);setStatus("Response updated","ok");instrInput.value="";
+  }catch(err){responseText.className="";setStatus("Error: "+err.message,"err");}
+}
+
+const copyToast=document.getElementById("copy-toast");
+function copyResponse(){
+  if(!currentResponse||responseText.classList.contains("placeholder"))return;
+  navigator.clipboard.writeText(currentResponse).then(()=>{copyToast.classList.add("show");setTimeout(()=>copyToast.classList.remove("show"),1800);});
+}
+
+
+// ─── Knowledge modal ──────────────────────────────────────────────────────
+let kbFiles=[];
+let kbEditingFile=null; // filename being edited, null = new
+
+const kbViewMode=document.getElementById("kb-view-mode");
+const kbEditMode=document.getElementById("kb-edit-mode");
+const kbEditFilename=document.getElementById("kb-edit-filename");
+const kbEditContent=document.getElementById("kb-edit-content");
+const kbFilelist=document.getElementById("kb-filelist");
+
+async function openKnowledge(){
+  openModal("kb-modal");
+  enterKbViewMode();
+  await reloadKbFiles();
+}
+
+async function reloadKbFiles(){
+  try{
+    kbFiles=await fetch("/api/knowledge_files").then(r=>r.json());
+    renderKbList();
+  }catch{kbFilelist.innerHTML='<div style="color:var(--red);padding:12px;font-size:10.5px;">Error loading files.</div>';}
+}
+
+function renderKbList(){
+  if(!kbFiles.length){kbFilelist.innerHTML='<div style="padding:12px;color:var(--dim);font-size:10.5px;">No files yet.<br>Click + New entry.</div>';return;}
+  const pinned=kbFiles.filter(f=>f.pinned),unpinned=kbFiles.filter(f=>!f.pinned);
+  let h="";
+  if(pinned.length){
+    h+=`<div class="kb-pin-legend">&#9670; Always included</div>`;
+    h+=pinned.map((f,i)=>kbFileItemHtml(f,kbFiles.indexOf(f))).join("");
+  }
+  if(unpinned.length){
+    if(pinned.length)h+=`<div class="kb-pin-legend" style="margin-top:4px;">Other files</div>`;
+    h+=unpinned.map(f=>kbFileItemHtml(f,kbFiles.indexOf(f))).join("");
+  }
+  kbFilelist.innerHTML=h;
+  kbFilelist.querySelectorAll(".kb-file-item").forEach(el=>{
+    el.addEventListener("click",e=>{
+      if(e.target.classList.contains("kf-del")||e.target.classList.contains("kf-pin"))return;
+      selectKbFile(parseInt(el.dataset.idx),el);
+    });
+  });
+  kbFilelist.querySelectorAll(".kf-del").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();deleteKbFile(btn.dataset.name);}));
+  kbFilelist.querySelectorAll(".kf-pin").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();togglePin(btn.dataset.name);}));
+  const first=kbFilelist.querySelector(".kb-file-item");if(first)first.click();
+}
+
+function kbFileItemHtml(f,idx){
+  return `<div class="kb-file-item${f.pinned?" pinned":""}" data-idx="${idx}">
+    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
+    <button class="kf-pin" data-name="${escHtml(f.name)}" title="${f.pinned?"Unpin (remove from all prompts)":"Pin (always include in prompts)"}">${f.pinned?"&#9670;":"&#9671;"}</button>
+    <button class="kf-del" data-name="${escHtml(f.name)}" title="Delete">&#215;</button>
+  </div>`;
+}
+
+async function togglePin(name){
+  const f=kbFiles.find(x=>x.name===name);if(!f)return;
+  const pinned=kbFiles.filter(x=>x.pinned).map(x=>x.name);
+  const newPinned=f.pinned?pinned.filter(n=>n!==name):[...pinned,name];
+  await fetch("/api/knowledge_pins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(newPinned)});
+  await reloadKbFiles();
+  setStatus(f.pinned?"Unpinned — file no longer auto-included":"Pinned — always included in prompts","ok");
+}
+
+function selectKbFile(idx,el){
+  kbFilelist.querySelectorAll(".kb-file-item").forEach(x=>x.classList.remove("active"));
+  if(el)el.classList.add("active");
+  enterKbViewMode(kbFiles[idx]);
+}
+
+const kbViewToolbar=document.getElementById("kb-view-toolbar");
+const kbViewFilenameEl=document.getElementById("kb-view-filename");
+const kbPinBtn=document.getElementById("kb-pin-btn");
+let kbSelectedFile=null;
+
+function enterKbViewMode(file){
+  kbViewMode.style.display="";kbEditMode.style.display="none";
+  kbSelectedFile=file||null;
+  if(file){
+    kbViewMode.textContent=file.content;kbViewMode.style.color="";
+    kbViewFilenameEl.textContent=file.name;kbViewToolbar.style.display="flex";
+    kbPinBtn.innerHTML=file.pinned?"&#9670; Pinned":"&#9671; Pin";
+    kbPinBtn.style.color=file.pinned?"var(--amber)":"";
+    kbPinBtn.style.borderColor=file.pinned?"var(--amber)":"";
+    kbPinBtn.title=file.pinned?"Always included — click to unpin":"Click to always include in prompts";
+  }else{
+    kbViewMode.textContent="Select a file.";kbViewMode.style.color="var(--dim)";
+    kbViewToolbar.style.display="none";
+  }
+}
+
+function enterKbEditMode(file){
+  kbViewMode.style.display="none";kbEditMode.style.display="flex";
+  if(file){
+    kbEditFilename.value=file.name.replace(/\.md$/,"");
+    kbEditFilename.disabled=true; // can't rename, just edit content
+    kbEditContent.value=file.content;
+    kbEditingFile=file.name;
+  }else{
+    kbEditFilename.value="";kbEditFilename.disabled=false;
+    kbEditContent.value="";kbEditingFile=null;
+  }
+  kbEditContent.focus();
+}
+
+document.getElementById("kb-new-btn").addEventListener("click",()=>enterKbEditMode(null));
+document.getElementById("kb-purge-btn").addEventListener("click",async()=>{
+  if(!confirm("Delete all auto-generated contact profiles? Manual entries and style guide are kept."))return;
+  const r=await fetch("/api/purge_contacts",{method:"POST"}).then(x=>x.json());
+  await reloadKbFiles();enterKbViewMode(null);
+  setStatus(`Purged ${r.count} contact profile(s)`,"ok");
+});
+document.getElementById("kb-edit-btn").addEventListener("click",()=>{if(kbSelectedFile)enterKbEditMode(kbSelectedFile);});
+document.getElementById("kb-pin-btn").addEventListener("click",()=>{if(kbSelectedFile)togglePin(kbSelectedFile.name);});
+document.getElementById("kb-cancel-edit").addEventListener("click",()=>{
+  enterKbViewMode(kbFiles.length?kbFiles[0]:null);
+  const first=kbFilelist.querySelector(".kb-file-item");if(first)first.click();
+});
+document.getElementById("kb-save-edit").addEventListener("click",async()=>{
+  const filename=kbEditingFile||(kbEditFilename.value.trim()||"untitled");
+  const content=kbEditContent.value;
+  try{
+    if(kbEditingFile){
+      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});
+    }else{
+      await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content})});
+    }
+    await reloadKbFiles();
+    setStatus("Knowledge file saved","ok");
+  }catch(err){setStatus("Save error: "+err.message,"err");}
+});
+
+async function deleteKbFile(name){
+  if(!confirm(`Delete "${name}"?`))return;
+  try{
+    await fetch(`/api/knowledge_files/${encodeURIComponent(name)}`,{method:"DELETE"});
+    await reloadKbFiles();
+    enterKbViewMode(null);
+    setStatus("Deleted "+name,"ok");
+  }catch(err){setStatus("Delete error: "+err.message,"err");}
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────
+const saveMsgEl=document.getElementById("settings-save-msg");
+
+const LM_PRESETS={
+  lmstudio:{base_url:"http://localhost:1234",model:"local-model",api_key:""},
+  litellm: {base_url:"http://localhost:4000",model:"gpt-4o",api_key:""},
+  openai:  {base_url:"https://api.openai.com",model:"gpt-4o",api_key:""},
+  anthropic:{base_url:"https://api.anthropic.com",model:"claude-opus-4-5",api_key:""},
+  ollama:  {base_url:"http://localhost:11434",model:"llama3",api_key:""},
+};
+document.getElementById("cfg-lm-preset").addEventListener("change",function(){
+  const p=LM_PRESETS[this.value];
+  if(!p)return;
+  document.getElementById("cfg-lm-url").value=p.base_url;
+  document.getElementById("cfg-lm-model").value=p.model;
+  document.getElementById("cfg-lm-apikey").value=p.api_key;
+});
+
+async function loadSettings(){
+  try{
+    const cfg=await fetch("/api/config").then(r=>r.json());
+    document.getElementById("cfg-lm-url").value=cfg.lm_studio?.base_url||"http://localhost:1234";
+    document.getElementById("cfg-lm-model").value=cfg.lm_studio?.model||"local-model";
+    document.getElementById("cfg-lm-apikey").value=cfg.lm_studio?.api_key||"";
+  }catch{}
+  try{
+    const accounts=await fetch("/api/accounts").then(r=>r.json());
+    accountsCache=accounts;renderAccountsList(accounts);
+  }catch{}
+}
+
+function renderAccountsList(accounts){
+  const c=document.getElementById("acct-list-container");
+  if(!accounts.length){c.innerHTML='<div style="color:var(--dim);font-size:11px;padding:8px 0;">No accounts configured yet.</div>';return;}
+  c.innerHTML=accounts.map(a=>`
+    <div class="acct-list-item">
+      <div class="acct-list-info"><div class="acct-list-name">${escHtml(a.name)}</div><div class="acct-list-user">${escHtml(a.imap?.username||"")}</div></div>
+      <div class="acct-list-actions">
+        <button class="icon-btn" data-edit-id="${escHtml(a.id)}">Edit</button>
+        <button class="icon-btn del" data-del-id="${escHtml(a.id)}" data-del-name="${escHtml(a.name)}">&#10005;</button>
+      </div>
+    </div>`).join("");
+  c.querySelectorAll("[data-edit-id]").forEach(btn=>btn.addEventListener("click",()=>openEditAccount(btn.dataset.editId)));
+  c.querySelectorAll("[data-del-id]").forEach(btn=>btn.addEventListener("click",()=>deleteAccount(btn.dataset.delId,btn.dataset.delName)));
+}
+
+function _populateAccountForm(acct){
+  document.getElementById("cfg-acct-id").value=acct?.id||"";
+  document.getElementById("cfg-acct-name").value=acct?.name||"";
+  document.getElementById("cfg-imap-server").value=acct?.imap?.server||"";
+  document.getElementById("cfg-imap-port").value=acct?.imap?.port||993;
+  document.getElementById("cfg-imap-username").value=acct?.imap?.username||"";
+  document.getElementById("cfg-imap-password").value=acct?.imap?.password||"";
+  document.getElementById("cfg-imap-limit").value=acct?.imap?.fetch_limit||300;
+  // Render saved sync_folders if any
+  const saved=acct?.imap?.sync_folders||[];
+  if(saved.length){discoveredFolders=saved;renderFolderPicker(saved,true);}
+  else{discoveredFolders=[];document.getElementById("folder-picker-list").style.display="none";document.getElementById("folder-picker-status").textContent="";}
+}
+
+function openEditAccount(accountId){
+  const acct=accountsCache.find(a=>a.id===accountId);if(!acct)return;
+  _populateAccountForm(acct);
+  document.getElementById("acct-edit-label").textContent="Edit Account";
+  switchTab("tab-acct-edit");settingsFooterMode("edit");
+}
+
+function openNewAccount(){
+  _populateAccountForm(null);
+  document.getElementById("acct-edit-label").textContent="New Account";
+  switchTab("tab-acct-edit");settingsFooterMode("new");
+}
+
+async function deleteAccount(accountId,name){
+  if(!confirm(`Delete account "${name}"? Synced emails remain in the database.`))return;
+  try{
+    await fetch(`/api/accounts/${encodeURIComponent(accountId)}`,{method:"DELETE"});
+    await loadSettings();loadFolders();setStatus(`Account "${name}" removed`,"ok");
+  }catch(err){setStatus("Delete error: "+err.message,"err");}
+}
+
+// ─── Folder discovery ─────────────────────────────────────────────────────
+function renderFolderPicker(folders,isSaved){
+  const list=document.getElementById("folder-picker-list");
+  list.style.display="block";
+  list.innerHTML=folders.map(f=>`
+    <div class="fp-item">
+      <input type="checkbox" class="fp-check" data-name="${escHtml(f.name)}" ${f.checked||isSaved?"checked":""}>
+      <span class="fp-name">${escHtml(f.name)}</span>
+      <select class="fp-role-sel" data-name="${escHtml(f.name)}">
+        <option value="inbox" ${f.role==="inbox"?"selected":""}>Inbox</option>
+        <option value="sent" ${f.role==="sent"?"selected":""}>Sent</option>
+        <option value="other" ${f.role==="other"?"selected":""}>Other</option>
+      </select>
+    </div>`).join("");
+  // Add role css
+  list.querySelectorAll(".fp-role-sel").forEach(sel=>{
+    function applyRole(){
+      const fp=sel.closest(".fp-item").querySelector(".fp-name");
+      const span=sel.closest(".fp-item");
+      // style handled by CSS class on the select option text — just keep data
+    }
+    applyRole();sel.addEventListener("change",applyRole);
+  });
+}
+
+function getSelectedFolders(){
+  const list=document.getElementById("folder-picker-list");
+  if(list.style.display==="none")return null; // not set, use defaults
+  const result=[];
+  list.querySelectorAll(".fp-item").forEach(item=>{
+    const chk=item.querySelector(".fp-check");
+    const role=item.querySelector(".fp-role-sel")?.value||"other";
+    if(chk?.checked)result.push({name:chk.dataset.name,role});
+  });
+  return result;
+}
+
+document.getElementById("btn-discover-folders").addEventListener("click",async()=>{
+  const status=document.getElementById("folder-picker-status");
+  status.textContent="Connecting…";status.style.color="var(--muted)";
+  const accountId=document.getElementById("cfg-acct-id").value.trim();
+  const payload={
+    account_id:accountId||undefined,
+    server:document.getElementById("cfg-imap-server").value.trim(),
+    port:parseInt(document.getElementById("cfg-imap-port").value)||993,
+    username:document.getElementById("cfg-imap-username").value.trim(),
+    password:document.getElementById("cfg-imap-password").value,
+    inbox_folder:"INBOX",sent_folder:"Sent Items",
+  };
+  try{
+    const res=await fetch("/api/imap_folders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+    if(res.success){
+      discoveredFolders=res.folders;
+      renderFolderPicker(res.folders,false);
+      status.textContent=`Found ${res.folders.length} folders.`;status.style.color="var(--green)";
+    }else{
+      status.textContent="Error: "+res.error;status.style.color="var(--red)";
+    }
+  }catch(err){status.textContent="Connection failed: "+err.message;status.style.color="var(--red)";}
+});
+
+// ─── Save settings ────────────────────────────────────────────────────────
+async function saveSettings(){
+  const activeTab=document.querySelector(".tab-btn.active")?.dataset.tab;
+  if(activeTab==="tab-acct-edit"){
+    const accountId=document.getElementById("cfg-acct-id").value.trim();
+    const selectedFolders=getSelectedFolders();
+    const payload={
+      name:document.getElementById("cfg-acct-name").value.trim(),
+      imap:{
+        server:document.getElementById("cfg-imap-server").value.trim(),
+        port:parseInt(document.getElementById("cfg-imap-port").value)||993,
+        username:document.getElementById("cfg-imap-username").value.trim(),
+        password:document.getElementById("cfg-imap-password").value,
+        fetch_limit:parseInt(document.getElementById("cfg-imap-limit").value)||300,
+      },
+    };
+    if(!payload.name){setStatus("Display name required","err");return;}
+    // Add folder selection
+    if(selectedFolders&&selectedFolders.length){
+      payload.imap.sync_folders=selectedFolders;
+      // Keep inbox_folder / sent_folder for backward compat
+      const inbox=selectedFolders.find(f=>f.role==="inbox");
+      const sent=selectedFolders.find(f=>f.role==="sent");
+      if(inbox)payload.imap.inbox_folder=inbox.name;
+      if(sent)payload.imap.sent_folder=sent.name;
+    }
+    try{
+      let res;
+      if(accountId)res=await fetch(`/api/accounts/${encodeURIComponent(accountId)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+      else res=await fetch("/api/accounts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+      if(res.success){
+        saveMsgEl.style.display="block";setTimeout(()=>saveMsgEl.style.display="none",2500);
+        setStatus("Account saved","ok");await loadSettings();loadFolders();
+        switchTab("tab-accounts");settingsFooterMode("list");
+      }else setStatus("Error: "+(res.error||"?"),"err");
+    }catch(err){setStatus("Save error: "+err.message,"err");}
+    return;
+  }
+  // LM / Whisper
+  const payload={
+    lm_studio:{base_url:document.getElementById("cfg-lm-url").value.trim(),model:document.getElementById("cfg-lm-model").value.trim(),api_key:document.getElementById("cfg-lm-apikey").value.trim()},
+  };
+  try{
+    const res=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
+    if(res.success){saveMsgEl.style.display="block";setTimeout(()=>saveMsgEl.style.display="none",2500);setStatus("Settings saved","ok");}
+    else setStatus("Error: "+(res.error||"?"),"err");
+  }catch(err){setStatus("Save error: "+err.message,"err");}
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────
+function extractName(s){const m=s.match(/^(.+?)\s*</);if(m&&m[1].trim())return m[1].replace(/^"|"$/g,"").trim();return s.replace(/<[^>]+>/g,"").trim()||s;}
+function extractEmail(s){const m=s.match(/<([^>]+)>/);return m?m[1]:s;}
+function formatRecipients(recs){
+  if(!recs)return"";let arr=recs;
+  try{if(typeof recs==="string")arr=JSON.parse(recs);}catch{return escHtml(recs);}
+  if(!Array.isArray(arr))return"";
+  return arr.slice(0,3).map(r=>escHtml(r.name||r.email||"")).join(", ");
+}
+function formatDate(s){
+  if(!s)return"";
+  try{const d=new Date(s),now=new Date();
+    if(d.toDateString()===now.toDateString())return d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    if((now-d)/86400000<7)return d.toLocaleDateString([],{weekday:"short"});
+    return d.toLocaleDateString([],{month:"short",day:"numeric"});
+  }catch{return s.substring(0,10);}
+}
+function escHtml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+
+// ─── Event wiring ─────────────────────────────────────────────────────────
+document.getElementById("btn-sync").addEventListener("click",()=>{
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const n=accountsCache.length*3;
+  fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,()=>loadFolders())).catch(err=>setStatus("Sync error: "+err.message,"err"));
+});
+document.getElementById("btn-build-kb").addEventListener("click",()=>{
+  // knowledge build: style + up to 40 contacts
+  fetch("/api/build_knowledge",{method:"POST"}).then(()=>startTaskPoll("Knowledge build",42,()=>{})).catch(err=>setStatus("Error: "+err.message,"err"));
+});
+document.getElementById("btn-view-kb").addEventListener("click",openKnowledge);
+document.getElementById("btn-settings").addEventListener("click",()=>{loadSettings();openModal("settings-modal");settingsFooterMode("list");switchTab("tab-accounts");});
+document.getElementById("btn-save-settings").addEventListener("click",saveSettings);
+document.getElementById("add-account-btn").addEventListener("click",openNewAccount);
+document.getElementById("btn-acct-back").addEventListener("click",()=>{switchTab("tab-accounts");settingsFooterMode("list");});
+document.getElementById("btn-propose").addEventListener("click",proposeResponse);
+document.getElementById("btn-copy").addEventListener("click",copyResponse);
+document.getElementById("btn-clear-resp").addEventListener("click",()=>{
+  responseText.textContent="Generate a response or give an instruction above";responseText.className="placeholder";
+  currentResponse="";instrInput.value="";kbTagsEl.style.display="none";
+});
+document.getElementById("btn-run-instruction").addEventListener("click",()=>runInstruction(instrInput.value));
+instrInput.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();runInstruction(instrInput.value);}
+});
+// Auto-grow textarea
+instrInput.addEventListener("input",()=>{instrInput.style.height="auto";instrInput.style.height=Math.min(instrInput.scrollHeight,120)+"px";});
+loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(true);});
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+loadFolders();
+setStatus("Ready","idle");
+statusModel.textContent="LM Studio: ready";
+statusModel.style.color="var(--green)";
+
+})();
+</script>
+</body>
+</html>

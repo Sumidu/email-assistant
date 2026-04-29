@@ -1,0 +1,27 @@
+{
+  "accounts": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "imap": {
+        "server":        "imap.example.com",
+        "port":          993,
+        "username":      "you@example.com",
+        "password":      "your-password-or-app-password",
+        "inbox_folder":  "INBOX",
+        "sent_folder":   "Sent Items",
+        "fetch_limit":   300
+      }
+    }
+  ],
+
+  "lm_studio": {
+    "base_url": "http://localhost:1234",
+    "model":    "local-model",
+    "api_key":  ""
+  },
+
+  "app": {
+    "port": 5100
+  }
+}

@@ -1,0 +1,33 @@
+# ── Credentials & config ─────────────────────────────────────────────────────
+# config.json contains IMAP passwords and API keys — never commit
+config.json
+
+# ── Runtime data (stored outside project in ~/email_assistant/) ───────────────
+*.db
+*.sqlite
+*.sqlite3
+knowledge/
+llm_requests.log
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+
+# ── Editors ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Claude Code internal ──────────────────────────────────────────────────────
+.claude/
