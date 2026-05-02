@@ -599,6 +599,7 @@ let kbLlmFilter="all";
 const kbViewMode=document.getElementById("kb-view-mode");
 const kbEditMode=document.getElementById("kb-edit-mode");
 const kbEditFilename=document.getElementById("kb-edit-filename");
+const kbEditAliases=document.getElementById("kb-edit-aliases");
 const kbEditPatterns=document.getElementById("kb-edit-patterns");
 const kbEditContent=document.getElementById("kb-edit-content");
 const kbFilelist=document.getElementById("kb-filelist");
@@ -621,6 +622,7 @@ async function reloadKbFiles(preferredFileName=null){
 
 function kbMetaLabel(f){
   const m=f.metadata||{};
+  if((m.aliases||[]).length)return `Aliases ${m.aliases.join(", ")}`;
   if((m.match_patterns||[]).length)return `Matches ${m.match_patterns.join(", ")}`;
   if(m.llm_name||m.model)return `${m.llm_name||m.llm_id||"Unknown"}${m.model?" / "+m.model:""}`;
   if(m.source==="manual")return"Manual";
@@ -629,6 +631,10 @@ function kbMetaLabel(f){
 
 function parseMatchPatterns(value){
   return String(value||"").split(/[,\n]+/).map(x=>x.trim().toLowerCase()).filter(Boolean);
+}
+
+function parseAliases(value){
+  return String(value||"").split(/[,\n]+/).map(x=>x.trim().toLowerCase()).filter(x=>x&&x.includes("@"));
 }
 
 function renderKbFilters(){
@@ -727,11 +733,13 @@ function enterKbEditMode(file){
   if(file){
     kbEditFilename.value=file.name.replace(/\.md$/,"");
     kbEditFilename.disabled=true; // can't rename, just edit content
+    kbEditAliases.value=(file.metadata?.aliases||[]).join(", ");
     kbEditPatterns.value=(file.metadata?.match_patterns||[]).join(", ");
     kbEditContent.value=file.content;
     kbEditingFile=file.name;
   }else{
     kbEditFilename.value="";kbEditFilename.disabled=false;
+    kbEditAliases.value="";
     kbEditPatterns.value="";
     kbEditContent.value="";kbEditingFile=null;
   }
@@ -767,12 +775,13 @@ document.getElementById("kb-cancel-edit").addEventListener("click",()=>{
 document.getElementById("kb-save-edit").addEventListener("click",async()=>{
   const filename=kbEditingFile||(kbEditFilename.value.trim()||"untitled");
   const content=kbEditContent.value;
+  const aliases=parseAliases(kbEditAliases.value);
   const match_patterns=parseMatchPatterns(kbEditPatterns.value);
   try{
     if(kbEditingFile){
-      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content,match_patterns})});
+      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content,aliases,match_patterns})});
     }else{
-      await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content,match_patterns})});
+      await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content,aliases,match_patterns})});
     }
     await reloadKbFiles();
     setStatus("Knowledge file saved","ok");

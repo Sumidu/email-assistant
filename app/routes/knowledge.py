@@ -57,6 +57,7 @@ def create_knowledge_file():
         data.get("content", ""),
         source=data.get("source", "manual"),
         match_patterns=data.get("match_patterns"),
+        aliases=data.get("aliases"),
     )
     return jsonify(result)
 
@@ -71,6 +72,7 @@ def update_knowledge_file(filename):
         data["content"],
         source=data.get("source", "manual"),
         match_patterns=data.get("match_patterns"),
+        aliases=data.get("aliases"),
     )
     return jsonify(result)
 

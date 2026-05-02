@@ -102,6 +102,17 @@ class KnowledgeBuilder:
         return result
 
     @staticmethod
+    def _normalize_aliases(aliases) -> list[str]:
+        if isinstance(aliases, str):
+            aliases = re.split(r"[\n,]+", aliases)
+        result = []
+        for alias in aliases or []:
+            alias = str(alias or "").strip().lower()
+            if alias and "@" in alias and alias not in result:
+                result.append(alias)
+        return result
+
+    @staticmethod
     def _pattern_matches_address(pattern: str, addr: str) -> bool:
         addr = (addr or "").lower()
         pattern = (pattern or "").lower()
@@ -123,6 +134,29 @@ class KnowledgeBuilder:
                 if os.path.exists(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))):
                     matches.append(os.path.basename(fname))
         return matches
+
+    def _alias_files_for_address(self, addr: str) -> list[str]:
+        addr = (addr or "").lower()
+        metadata = self._load_metadata()
+        matches = []
+        for fname, meta in metadata.items():
+            aliases = self._normalize_aliases(meta.get("aliases", []))
+            if addr in aliases and os.path.exists(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))):
+                matches.append(os.path.basename(fname))
+        return matches
+
+    def _metadata_files_for_address(self, addr: str) -> list[tuple[str, str]]:
+        result = []
+        seen = set()
+        for fname in self._alias_files_for_address(addr):
+            if fname not in seen:
+                result.append((fname, "alias"))
+                seen.add(fname)
+        for fname in self._pattern_files_for_address(addr):
+            if fname not in seen:
+                result.append((fname, "wildcard"))
+                seen.add(fname)
+        return result
 
     def _remove_file_metadata(self, filename: str) -> None:
         metadata = self._load_metadata()
@@ -215,7 +249,7 @@ class KnowledgeBuilder:
                     "name": candidate.get("name") or addr,
                     "file": self.contact_filename(addr),
                 })
-            for fname in self._pattern_files_for_address(addr):
+            for fname, match_type in self._metadata_files_for_address(addr):
                 key = f"{addr}:{fname}"
                 if key in seen:
                     continue
@@ -224,7 +258,7 @@ class KnowledgeBuilder:
                     "email": addr,
                     "name": candidate.get("name") or addr,
                     "file": fname,
-                    "match": "wildcard",
+                    "match": match_type,
                 })
         return matches
 
@@ -475,12 +509,13 @@ class KnowledgeBuilder:
                 knowledge.append(("Contact Profile", f.read()))
             loaded_paths.add(contact_path)
 
-        for fname in self._pattern_files_for_address(sender_email):
+        for fname, match_type in self._metadata_files_for_address(sender_email):
             fpath = os.path.join(KNOWLEDGE_DIR, fname)
             if os.path.exists(fpath) and fpath not in loaded_paths:
                 with open(fpath, "r", encoding="utf-8") as f:
                     label = fname.replace(".md", "").replace("_", " ").title()
-                    knowledge.append((f"Wildcard: {label}", f.read()))
+                    prefix = "Alias" if match_type == "alias" else "Wildcard"
+                    knowledge.append((f"{prefix}: {label}", f.read()))
                 loaded_paths.add(fpath)
 
         return knowledge
@@ -500,6 +535,8 @@ class KnowledgeBuilder:
             loaded_paths.add(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname)))
         loaded_paths.add(os.path.join(KNOWLEDGE_DIR, "_writing_style.md"))
         loaded_paths.add(os.path.join(KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"))
+        for fname, _ in self._metadata_files_for_address(sender_email):
+            loaded_paths.add(os.path.join(KNOWLEDGE_DIR, fname))
 
         # Extract candidate names: capitalised words 3+ chars from subject + first 1500 chars of body
         text = f"{subject} {body[:1500]}"
@@ -563,11 +600,11 @@ class KnowledgeBuilder:
             _add(os.path.basename(fname))
         _add("_writing_style.md")
         _add(self._safe_filename(sender_email.lower()) + ".md")
-        for fname in self._pattern_files_for_address(sender_email):
+        for fname, _ in self._metadata_files_for_address(sender_email):
             _add(fname)
         for addr in (recipient_emails or []):
             _add(self._safe_filename(addr.lower()) + ".md")
-            for fname in self._pattern_files_for_address(addr):
+            for fname, _ in self._metadata_files_for_address(addr):
                 _add(fname)
         return suggested
 
@@ -578,7 +615,7 @@ class KnowledgeBuilder:
         with open(fpath, "r", encoding="utf-8") as f:
             return f.read()
 
-    def save_knowledge_file(self, filename: str, content: str, source: str = "manual", match_patterns=None) -> dict:
+    def save_knowledge_file(self, filename: str, content: str, source: str = "manual", match_patterns=None, aliases=None) -> dict:
         if not filename.endswith(".md"):
             filename += ".md"
         filename = self._safe_filename(filename.replace(".md", "")) + ".md"
@@ -608,6 +645,16 @@ class KnowledgeBuilder:
                 "generated_at": datetime.now().isoformat(),
             })
             metadata[filename]["match_patterns"] = self._normalize_match_patterns(match_patterns)
+        if aliases is not None:
+            metadata.setdefault(filename, {
+                "source": "manual",
+                "llm_id": "",
+                "llm_name": "",
+                "model": "",
+                "base_url": "",
+                "generated_at": datetime.now().isoformat(),
+            })
+            metadata[filename]["aliases"] = self._normalize_aliases(aliases)
         self._save_metadata(metadata)
         return {"success": True, "name": filename}
 
