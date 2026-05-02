@@ -595,6 +595,8 @@ function proposeResponse(){
 let kbFiles=[];
 let kbEditingFile=null; // filename being edited, null = new
 let kbLlmFilter="all";
+let kbSearchQuery="";
+let kbMergeSelection=new Set();
 
 const kbViewMode=document.getElementById("kb-view-mode");
 const kbEditMode=document.getElementById("kb-edit-mode");
@@ -603,6 +605,8 @@ const kbEditAliases=document.getElementById("kb-edit-aliases");
 const kbEditPatterns=document.getElementById("kb-edit-patterns");
 const kbEditContent=document.getElementById("kb-edit-content");
 const kbFilelist=document.getElementById("kb-filelist");
+const kbSearchInput=document.getElementById("kb-search");
+const kbMergeBtn=document.getElementById("kb-merge-btn");
 const kbLlmFilterEl=document.getElementById("kb-llm-filter");
 
 async function openKnowledge(preferredFileName=null){
@@ -650,14 +654,30 @@ function renderKbFilters(){
 }
 
 function filteredKbFiles(){
-  if(kbLlmFilter==="all")return kbFiles;
-  if(kbLlmFilter==="unknown")return kbFiles.filter(f=>!f.metadata?.llm_id);
-  return kbFiles.filter(f=>f.metadata?.llm_id===kbLlmFilter);
+  let files=kbFiles;
+  if(kbLlmFilter==="unknown")files=files.filter(f=>!f.metadata?.llm_id);
+  else if(kbLlmFilter!=="all")files=files.filter(f=>f.metadata?.llm_id===kbLlmFilter);
+  const q=kbSearchQuery.trim().toLowerCase();
+  if(!q)return files;
+  return files.filter(f=>{
+    const meta=f.metadata||{};
+    return [
+      f.name,
+      f.content,
+      kbMetaLabel(f),
+      ...(meta.aliases||[]),
+      ...(meta.match_patterns||[]),
+    ].join("\n").toLowerCase().includes(q);
+  });
+}
+
+function updateKbMergeButton(){
+  kbMergeBtn.disabled=kbMergeSelection.size!==2;
 }
 
 function renderKbList(preferredFileName=null){
   const visible=filteredKbFiles();
-  if(!visible.length){kbFilelist.innerHTML='<div style="padding:12px;color:var(--dim);font-size:10.5px;">No files match this filter.</div>';return;}
+  if(!visible.length){kbFilelist.innerHTML='<div style="padding:12px;color:var(--dim);font-size:10.5px;">No files match this filter.</div>';updateKbMergeButton();return;}
   const pinned=visible.filter(f=>f.pinned),unpinned=visible.filter(f=>!f.pinned);
   let h="";
   if(pinned.length){
@@ -671,18 +691,26 @@ function renderKbList(preferredFileName=null){
   kbFilelist.innerHTML=h;
   kbFilelist.querySelectorAll(".kb-file-item").forEach(el=>{
     el.addEventListener("click",e=>{
-      if(e.target.classList.contains("kf-del")||e.target.classList.contains("kf-pin"))return;
+      if(e.target.classList.contains("kf-del")||e.target.classList.contains("kf-pin")||e.target.classList.contains("kf-select"))return;
       selectKbFile(parseInt(el.dataset.idx),el);
     });
   });
+  kbFilelist.querySelectorAll(".kf-select").forEach(chk=>chk.addEventListener("change",e=>{
+    e.stopPropagation();
+    if(chk.checked)kbMergeSelection.add(chk.dataset.name);
+    else kbMergeSelection.delete(chk.dataset.name);
+    updateKbMergeButton();
+  }));
   kbFilelist.querySelectorAll(".kf-del").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();deleteKbFile(btn.dataset.name);}));
   kbFilelist.querySelectorAll(".kf-pin").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();togglePin(btn.dataset.name);}));
+  updateKbMergeButton();
   const target=preferredFileName?kbFilelist.querySelector(`.kb-file-item[data-name="${CSS.escape(preferredFileName)}"]`):null;
   const first=target||kbFilelist.querySelector(".kb-file-item");if(first)first.click();
 }
 
 function kbFileItemHtml(f,idx){
   return `<div class="kb-file-item${f.pinned?" pinned":""}" data-idx="${idx}" data-name="${escHtml(f.name)}">
+    <input class="kf-select" type="checkbox" data-name="${escHtml(f.name)}" ${kbMergeSelection.has(f.name)?"checked":""} title="Select for merge">
     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span>${escHtml(f.name)}</span><small>${escHtml(kbMetaLabel(f))}</small></span>
     <button class="kf-pin" data-name="${escHtml(f.name)}" title="${f.pinned?"Unpin (remove from all prompts)":"Pin (always include in prompts)"}">${f.pinned?"&#9670;":"&#9671;"}</button>
     <button class="kf-del" data-name="${escHtml(f.name)}" title="Delete">&#215;</button>
@@ -732,7 +760,7 @@ function enterKbEditMode(file){
   kbViewMode.style.display="none";kbEditMode.style.display="flex";
   if(file){
     kbEditFilename.value=file.name.replace(/\.md$/,"");
-    kbEditFilename.disabled=true; // can't rename, just edit content
+    kbEditFilename.disabled=false;
     kbEditAliases.value=(file.metadata?.aliases||[]).join(", ");
     kbEditPatterns.value=(file.metadata?.match_patterns||[]).join(", ");
     kbEditContent.value=file.content;
@@ -756,7 +784,22 @@ document.getElementById("kb-purge-btn").addEventListener("click",async()=>{
 document.getElementById("kb-edit-btn").addEventListener("click",()=>{if(kbSelectedFile)enterKbEditMode(kbSelectedFile);});
 document.getElementById("kb-delete-btn").addEventListener("click",()=>{if(kbSelectedFile)deleteKbFile(kbSelectedFile.name);});
 document.getElementById("kb-pin-btn").addEventListener("click",()=>{if(kbSelectedFile)togglePin(kbSelectedFile.name);});
-kbLlmFilterEl.addEventListener("change",()=>{kbLlmFilter=kbLlmFilterEl.value;renderKbList();});
+kbSearchInput.addEventListener("input",()=>{kbSearchQuery=kbSearchInput.value;renderKbList(kbSelectedFile?.name||null);});
+kbLlmFilterEl.addEventListener("change",()=>{kbLlmFilter=kbLlmFilterEl.value;renderKbList(kbSelectedFile?.name||null);});
+kbMergeBtn.addEventListener("click",async()=>{
+  const selected=[...kbMergeSelection];
+  if(selected.length!==2)return;
+  const target=(kbSelectedFile&&kbMergeSelection.has(kbSelectedFile.name))?kbSelectedFile.name:selected[0];
+  const source=selected.find(name=>name!==target);
+  if(!confirm(`Merge "${source}" into "${target}"?\n\nThe source entry will be removed locally and added as an alias/merged section on the target entry.`))return;
+  try{
+    const r=await fetch("/api/knowledge_files/merge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target,source})}).then(x=>x.json());
+    if(!r.success){setStatus("Merge failed: "+(r.error||"?"),"err");return;}
+    kbMergeSelection=new Set();
+    await reloadKbFiles(r.target);
+    setStatus(`Merged ${r.removed} into ${r.target}`,"ok");
+  }catch(err){setStatus("Merge failed: "+err.message,"err");}
+});
 document.getElementById("kb-delete-filtered-btn").addEventListener("click",async()=>{
   if(kbLlmFilter==="all"){setStatus("Choose an LLM filter first","err");return;}
   if(kbLlmFilter==="unknown"){setStatus("Bulk delete is available for generated LLM entries only","err");return;}
@@ -774,12 +817,13 @@ document.getElementById("kb-cancel-edit").addEventListener("click",()=>{
 });
 document.getElementById("kb-save-edit").addEventListener("click",async()=>{
   const filename=kbEditingFile||(kbEditFilename.value.trim()||"untitled");
+  const newFilename=kbEditFilename.value.trim()||filename;
   const content=kbEditContent.value;
   const aliases=parseAliases(kbEditAliases.value);
   const match_patterns=parseMatchPatterns(kbEditPatterns.value);
   try{
     if(kbEditingFile){
-      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content,aliases,match_patterns})});
+      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:newFilename,content,aliases,match_patterns})});
     }else{
       await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content,aliases,match_patterns})});
     }

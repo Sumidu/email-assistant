@@ -164,6 +164,39 @@ class KnowledgeBuilder:
             metadata.pop(filename, None)
             self._save_metadata(metadata)
 
+    @staticmethod
+    def _metadata_template(source: str = "manual") -> dict:
+        return {
+            "source": source,
+            "llm_id": "",
+            "llm_name": "",
+            "model": "",
+            "base_url": "",
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    @staticmethod
+    def _unique_values(*values) -> list[str]:
+        result = []
+        for group in values:
+            for value in group or []:
+                value = str(value or "").strip().lower()
+                if value and value not in result:
+                    result.append(value)
+        return result
+
+    @staticmethod
+    def _infer_alias_from_filename(filename: str) -> str:
+        stem = os.path.basename(filename).replace(".md", "").lower()
+        if "@" in stem:
+            return stem
+        if "_" not in stem:
+            return ""
+        local, domain = stem.rsplit("_", 1)
+        if "." not in domain:
+            return ""
+        return f"{local}@{domain}"
+
     # ---- helpers -----------------------------------------------------------
 
     @staticmethod
@@ -627,36 +660,82 @@ class KnowledgeBuilder:
         if source != "manual":
             metadata[filename] = self._current_llm_metadata(source)
         elif not existed:
-            metadata.setdefault(filename, {
-                "source": "manual",
-                "llm_id": "",
-                "llm_name": "",
-                "model": "",
-                "base_url": "",
-                "generated_at": datetime.now().isoformat(),
-            })
+            metadata.setdefault(filename, self._metadata_template("manual"))
         if match_patterns is not None:
-            metadata.setdefault(filename, {
-                "source": "manual",
-                "llm_id": "",
-                "llm_name": "",
-                "model": "",
-                "base_url": "",
-                "generated_at": datetime.now().isoformat(),
-            })
+            metadata.setdefault(filename, self._metadata_template("manual"))
             metadata[filename]["match_patterns"] = self._normalize_match_patterns(match_patterns)
         if aliases is not None:
-            metadata.setdefault(filename, {
-                "source": "manual",
-                "llm_id": "",
-                "llm_name": "",
-                "model": "",
-                "base_url": "",
-                "generated_at": datetime.now().isoformat(),
-            })
+            metadata.setdefault(filename, self._metadata_template("manual"))
             metadata[filename]["aliases"] = self._normalize_aliases(aliases)
         self._save_metadata(metadata)
         return {"success": True, "name": filename}
+
+    def rename_knowledge_file(self, filename: str, new_filename: str) -> dict:
+        old_name = os.path.basename(filename)
+        if not new_filename.endswith(".md"):
+            new_filename += ".md"
+        new_name = self._safe_filename(new_filename.replace(".md", "")) + ".md"
+        if old_name == new_name:
+            return {"success": True, "name": old_name}
+        old_path = os.path.join(KNOWLEDGE_DIR, old_name)
+        new_path = os.path.join(KNOWLEDGE_DIR, new_name)
+        if not old_path.endswith(".md") or not os.path.exists(old_path):
+            return {"success": False, "error": "File not found"}
+        if os.path.exists(new_path):
+            return {"success": False, "error": "Target name already exists"}
+        os.rename(old_path, new_path)
+
+        metadata = self._load_metadata()
+        if old_name in metadata:
+            metadata[new_name] = metadata.pop(old_name)
+            self._save_metadata(metadata)
+
+        pinned = [new_name if os.path.basename(p) == old_name else p for p in self.get_pinned()]
+        self.set_pinned(pinned)
+        return {"success": True, "name": new_name}
+
+    def merge_knowledge_files(self, target: str, source: str) -> dict:
+        target_name = os.path.basename(target)
+        source_name = os.path.basename(source)
+        if target_name == source_name:
+            return {"success": False, "error": "Choose two different entries"}
+        target_path = os.path.join(KNOWLEDGE_DIR, target_name)
+        source_path = os.path.join(KNOWLEDGE_DIR, source_name)
+        if not target_path.endswith(".md") or not os.path.exists(target_path):
+            return {"success": False, "error": "Target file not found"}
+        if not source_path.endswith(".md") or not os.path.exists(source_path):
+            return {"success": False, "error": "Source file not found"}
+
+        with open(target_path, "r", encoding="utf-8") as f:
+            target_content = f.read().rstrip()
+        with open(source_path, "r", encoding="utf-8") as f:
+            source_content = f.read().strip()
+        merged_content = f"{target_content}\n\n---\n\n## Merged from {source_name}\n\n{source_content}\n"
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(merged_content)
+
+        metadata = self._load_metadata()
+        target_meta = metadata.setdefault(target_name, self._metadata_template("manual"))
+        source_meta = metadata.get(source_name, {})
+        inferred_alias = self._infer_alias_from_filename(source_name)
+        target_meta["aliases"] = self._unique_values(
+            target_meta.get("aliases", []),
+            source_meta.get("aliases", []),
+            [inferred_alias] if inferred_alias else [],
+        )
+        target_meta["match_patterns"] = self._unique_values(
+            target_meta.get("match_patterns", []),
+            source_meta.get("match_patterns", []),
+        )
+        metadata.pop(source_name, None)
+        self._save_metadata(metadata)
+
+        os.remove(source_path)
+        pinned = [p for p in self.get_pinned() if os.path.basename(p) != source_name]
+        if source_name in [os.path.basename(p) for p in self.get_pinned()] and target_name not in pinned:
+            pinned.append(target_name)
+        self.set_pinned(pinned)
+        return {"success": True, "target": target_name, "removed": source_name}
 
     def delete_knowledge_file(self, filename: str) -> dict:
         fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(filename))

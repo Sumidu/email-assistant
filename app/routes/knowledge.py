@@ -67,6 +67,12 @@ def update_knowledge_file(filename):
     data = request.json
     if not data or "content" not in data:
         return jsonify({"error": "Missing content"}), 400
+    target_name = data.get("filename")
+    if target_name and target_name != filename:
+        rename_result = rt.kb.rename_knowledge_file(filename, target_name)
+        if not rename_result.get("success"):
+            return jsonify(rename_result), 400
+        filename = rename_result["name"]
     result = rt.kb.save_knowledge_file(
         filename,
         data["content"],
@@ -75,6 +81,14 @@ def update_knowledge_file(filename):
         aliases=data.get("aliases"),
     )
     return jsonify(result)
+
+
+@bp.route("/knowledge_files/merge", methods=["POST"])
+def merge_knowledge_files():
+    data = request.json or {}
+    result = rt.kb.merge_knowledge_files(data.get("target", ""), data.get("source", ""))
+    status = 200 if result.get("success") else 400
+    return jsonify(result), status
 
 
 @bp.route("/knowledge_files/<path:filename>", methods=["DELETE"])
