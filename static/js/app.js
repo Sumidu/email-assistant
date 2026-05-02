@@ -92,26 +92,31 @@ function showProgress(lines,progressPct){
 function hideProgress(){progressDrawer.classList.remove("open");pdBar.style.width="0%";}
 
 // ─── Task polling ─────────────────────────────────────────────────────────
-let totalExpected=0;
+let totalExpected=0,taskPollTicks=0,kbLiveRefreshBusy=false;
+function isKnowledgeTask(label){return String(label||"").toLowerCase().includes("knowledge");}
 function startTaskPoll(label,expectedSteps,onDone){
   totalExpected=expectedSteps||0;
+  taskPollTicks=0;
   setStatus(label+"…","busy");
   progressLog.innerHTML="";
   progressDrawer.classList.add("open");
   progressDrawer.classList.toggle("minimized",progressMinimized);
   clearInterval(taskPollInterval);
   taskPollInterval=setInterval(async()=>{
+    taskPollTicks++;
     const s=await fetch("/api/task_status").then(r=>r.json());
     const lines=s.progress||[];
     const pct=totalExpected>0?Math.min(99,Math.round(lines.length/totalExpected*100)):0;
     if(lines.length)showProgress(lines,pct);
     if(s.message)setStatus(s.message,"busy");
+    if(isKnowledgeTask(label)&&taskPollTicks%4===0)refreshKnowledgeIndicators();
     if(!s.running){
       clearInterval(taskPollInterval);taskPollInterval=null;
       const ok=s.result&&s.result.success!==false;
       setStatus(ok?"Done — "+label:"Error: "+(s.result?.error||"?"),ok?"ok":"err");
       showProgress(lines,100);
       setTimeout(hideProgress,4000);
+      if(isKnowledgeTask(label))await refreshKnowledgeIndicators();
       if(onDone)onDone(s.result);
     }
   },800);
@@ -195,16 +200,35 @@ function setupAutoSyncTimer(){
 }
 
 // ─── Email list ───────────────────────────────────────────────────────────
-async function loadEmailList(append=false){
+async function loadEmailList(append=false,{preserveSelection=false}={}){
   if(!currentFolder)return;
   try{
+    const selectedId=preserveSelection?currentEmail?.id:null;
     const url=`/api/emails?limit=${PAGE_SIZE}&offset=${emailOffset}&folder=${encodeURIComponent(currentFolder)}&account_id=${encodeURIComponent(currentAccountId||"")}`;
     const emails=await fetch(url).then(r=>r.json());
     if(!append)allEmailsLocal=emails;else allEmailsLocal=allEmailsLocal.concat(emails);
     emailCount.textContent=allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length;
-    renderEmailList(allEmailsLocal,append);
+    renderVisibleEmailList(append);
     loadMoreBtn.style.display=emails.length>=PAGE_SIZE?"block":"none";
+    if(selectedId){
+      const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(selectedId)}"]`);
+      if(row)row.classList.add("selected");
+    }
+    return emails;
   }catch(err){setStatus("Error: "+err.message,"err");}
+}
+
+function filteredEmails(){
+  const q=searchInput.value.trim().toLowerCase();
+  if(!q)return allEmailsLocal;
+  return allEmailsLocal.filter(e=>(e.subject||"").toLowerCase().includes(q)||(e.sender||"").toLowerCase().includes(q));
+}
+
+function renderVisibleEmailList(append=false){
+  const visible=append?allEmailsLocal:filteredEmails();
+  renderEmailList(visible,append);
+  const q=searchInput.value.trim();
+  emailCount.textContent=q?visible.length+" found":(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
 }
 
 function renderEmailList(emails,append=false){
@@ -232,10 +256,7 @@ function renderEmailList(emails,append=false){
 searchInput.addEventListener("input",()=>{
   clearTimeout(searchTimer);
   searchTimer=setTimeout(()=>{
-    const q=searchInput.value.trim().toLowerCase();
-    if(!q){renderEmailList(allEmailsLocal);emailCount.textContent=allEmailsLocal.length;return;}
-    const f=allEmailsLocal.filter(e=>(e.subject||"").toLowerCase().includes(q)||(e.sender||"").toLowerCase().includes(q));
-    renderEmailList(f);emailCount.textContent=f.length+" found";
+    renderVisibleEmailList();
   },220);
 });
 
@@ -286,20 +307,31 @@ function clearCurrentEmailView(){
   activeCtxFiles=new Set();renderCtxTags();
 }
 
-async function refreshAfterEmailMove(emailId){
+function adjacentEmailId(emailId){
+  const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(emailId)}"]`);
+  if(!row)return null;
+  return row.nextElementSibling?.dataset.id||row.previousElementSibling?.dataset.id||null;
+}
+
+async function refreshAfterEmailMove(emailId,nextId=null){
   allEmailsLocal=allEmailsLocal.filter(e=>e.id!==emailId);
   await loadFolders();
-  if(currentFolder)loadEmailList();
+  if(currentFolder)await loadEmailList();
+  if(nextId){
+    const nextRow=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(nextId)}"]`);
+    if(nextRow)await openEmail(nextId,nextRow);
+    else clearCurrentEmailView();
+  }else if(currentEmail?.id===emailId)clearCurrentEmailView();
 }
 
 async function markEmailDone(emailId=currentEmail?.id,{fromList=false}={}){
   if(!emailId)return;
+  const nextId=adjacentEmailId(emailId);
   try{
     const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"POST"}).then(r=>r.json());
     if(!res.success){setStatus("Done failed: "+(res.error||"?"),"err");return;}
     setStatus("Moved to local Finished folder","ok");
-    if(currentEmail?.id===emailId)clearCurrentEmailView();
-    await refreshAfterEmailMove(emailId);
+    await refreshAfterEmailMove(emailId,nextId);
   }catch(err){setStatus("Done failed: "+err.message,"err");}
 }
 
@@ -395,6 +427,17 @@ async function loadSuggestedContext(email){
     activeCtxFiles=new Set(files);
     renderCtxTags();
   }catch(e){}
+}
+
+async function refreshKnowledgeIndicators(){
+  if(kbLiveRefreshBusy)return;
+  kbLiveRefreshBusy=true;
+  try{
+    if(currentFolder)await loadEmailList(false,{preserveSelection:true});
+    if(currentEmail)await loadSuggestedContext(currentEmail);
+  }finally{
+    kbLiveRefreshBusy=false;
+  }
 }
 
 // ─── Context picker ───────────────────────────────────────────────────────
