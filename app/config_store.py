@@ -33,7 +33,7 @@ def detect_imap_provider(imap: dict) -> dict:
     """Return a conservative provider guess from IMAP host and login identity."""
     override = str(imap.get("provider_override") or "auto").strip().lower()
     manual = {
-        "outlook": ("Outlook / Microsoft 365", "Use Microsoft Graph for future calendar integration."),
+        "outlook": ("Microsoft / Exchange / Outlook", "Use Microsoft Graph or Exchange EWS for future calendar integration."),
         "google": ("Google / Gmail", "Use Google Calendar for future calendar integration."),
         "generic": ("Generic IMAP", "No calendar provider selected."),
     }
@@ -59,7 +59,7 @@ def detect_imap_provider(imap: dict) -> dict:
     if any(token in haystack for token in outlook_hosts):
         confidence = "high" if "outlook.office365.com" in server or "outlook.com" in domain else "medium"
         reason = "IMAP host or login domain matches Microsoft Outlook / Microsoft 365."
-        return {"id": "outlook", "name": "Outlook / Microsoft 365", "confidence": confidence, "reason": reason}
+        return {"id": "outlook", "name": "Microsoft / Exchange / Outlook", "confidence": confidence, "reason": reason}
 
     if "gmail.com" in haystack or "googlemail.com" in haystack:
         return {"id": "google", "name": "Google / Gmail", "confidence": "high", "reason": "IMAP host or login domain matches Google Mail."}
@@ -123,6 +123,12 @@ def migrate_config(config: dict) -> dict:
     for account in config.get("accounts", []):
         imap = account.setdefault("imap", {})
         imap.setdefault("provider_override", "auto")
+        imap.setdefault("calendar_enabled", False)
+        imap.setdefault("calendar_method", "ics")
+        imap.setdefault("calendar_url", "")
+        imap.setdefault("ews_url", "")
+        imap.setdefault("graph_client_id", "")
+        imap.setdefault("graph_tenant_id", "common")
         imap.setdefault("fetch_limit", 300)
         imap.setdefault("sync_mode", "recent")
         imap.setdefault("sync_since", "")

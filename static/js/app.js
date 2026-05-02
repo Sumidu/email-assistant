@@ -8,6 +8,8 @@ let allEmailsLocal=[];
 let taskPollInterval=null,searchTimer=null,accountsCache=[];
 let autoSyncTimer=null,lastAutoSyncAt={};
 let discoveredFolders=[];  // from IMAP discovery
+let calendarEvents=[];
+let calendarWeekStart=null;
 
 // ─── Theme ────────────────────────────────────────────────────────────────
 const html=document.documentElement,themeToggle=document.getElementById("theme-toggle");
@@ -1203,7 +1205,7 @@ function formatBytes(n){
 }
 
 function providerFromOverride(value){
-  if(value==="outlook")return {id:"outlook",name:"Outlook / Microsoft 365",confidence:"manual"};
+  if(value==="outlook")return {id:"outlook",name:"Microsoft / Exchange / Outlook",confidence:"manual"};
   if(value==="google")return {id:"google",name:"Google / Gmail",confidence:"manual"};
   if(value==="generic")return {id:"generic",name:"Generic IMAP",confidence:"manual"};
   return null;
@@ -1217,7 +1219,7 @@ function detectProviderFromFields(server,username,override){
   const domain=u.includes("@")?u.split("@").pop():"";
   const hay=[s,domain].join(" ");
   const outlook=["outlook.office365.com","imap-mail.outlook.com","imap.outlook.com","office365.com","outlook.com","hotmail.com","live.com","msn.com"];
-  if(outlook.some(x=>hay.includes(x)))return {id:"outlook",name:"Outlook / Microsoft 365",confidence:s.includes("outlook.office365.com")||domain.includes("outlook.com")?"high":"medium"};
+  if(outlook.some(x=>hay.includes(x)))return {id:"outlook",name:"Microsoft / Exchange / Outlook",confidence:s.includes("outlook.office365.com")||domain.includes("outlook.com")?"high":"medium"};
   if(hay.includes("gmail.com")||hay.includes("googlemail.com"))return {id:"google",name:"Google / Gmail",confidence:"high"};
   if(hay.includes("icloud.com")||domain==="me.com"||domain==="mac.com")return {id:"icloud",name:"Apple iCloud",confidence:"high"};
   return {id:"generic",name:"Generic IMAP",confidence:"low"};
@@ -1255,6 +1257,7 @@ async function loadAccountInfoTip(el){
       `Database file: ${formatBytes(data.database_file_bytes)}`,
       acct?.imap?.detected_provider?.name?`Detected provider: ${acct.imap.detected_provider.name} (${acct.imap.detected_provider.confidence||"unknown"} confidence)`:"",
       acct?.imap?.provider_override&&acct.imap.provider_override!=="auto"?`Provider override: ${acct.imap.provider_override}`:"Provider override: auto",
+      acct?.imap?.calendar_enabled?`Calendar: enabled (${acct.imap.calendar_method||"ics"})`:"Calendar: off",
       acct?.imap?.sync_mode?`Mode: ${acct.imap.sync_mode}`:"",
       acct?.imap?.auto_sync?`Auto-sync: every ${acct.imap.sync_interval_minutes||5} min`:"Auto-sync: off",
       folders?`\nFolders:\n${folders}`:"",
@@ -1273,6 +1276,8 @@ function _populateAccountForm(acct){
   document.getElementById("cfg-imap-username").value=acct?.imap?.username||"";
   document.getElementById("cfg-imap-password").value=acct?.imap?.password||"";
   document.getElementById("cfg-provider-override").value=acct?.imap?.provider_override||"auto";
+  document.getElementById("cfg-calendar-url").value=acct?.imap?.calendar_url||"";
+  document.getElementById("cfg-calendar-enabled").checked=!!acct?.imap?.calendar_enabled;
   document.getElementById("cfg-imap-limit").value=acct?.imap?.fetch_limit||300;
   document.getElementById("cfg-sync-mode").value=acct?.imap?.sync_mode||"recent";
   document.getElementById("cfg-sync-since").value=acct?.imap?.sync_since||"";
@@ -1387,6 +1392,8 @@ async function saveSettings(){
         username:document.getElementById("cfg-imap-username").value.trim(),
         password:document.getElementById("cfg-imap-password").value,
         provider_override:document.getElementById("cfg-provider-override").value||"auto",
+        calendar_url:document.getElementById("cfg-calendar-url").value.trim(),
+        calendar_enabled:document.getElementById("cfg-calendar-enabled").checked,
         fetch_limit:parseInt(document.getElementById("cfg-imap-limit").value)||300,
         sync_mode:document.getElementById("cfg-sync-mode").value,
         sync_since:document.getElementById("cfg-sync-since").value,
@@ -1475,7 +1482,219 @@ document.getElementById("btn-build-kb").addEventListener("click",async()=>{
   }catch(err){setStatus("Knowledge update failed: "+err.message,"err");}
 });
 document.getElementById("btn-view-kb").addEventListener("click",openKnowledge);
+document.getElementById("btn-calendar").addEventListener("click",openCalendar);
 document.getElementById("btn-settings").addEventListener("click",()=>{loadSettings();openModal("settings-modal");settingsFooterMode("list");switchTab("tab-accounts");});
+
+// ─── Calendar modal ───────────────────────────────────────────────────────
+function calendarWindow(){
+  const start=calendarWeekStart||startOfWeek(new Date());
+  const end=new Date(start);end.setDate(start.getDate()+7);
+  return {start,end};
+}
+
+function startOfWeek(date){
+  const d=new Date(date);
+  d.setHours(0,0,0,0);
+  const day=(d.getDay()+6)%7;
+  d.setDate(d.getDate()-day);
+  return d;
+}
+
+function formatCalendarDate(d){
+  return d.toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"});
+}
+
+function formatCalendarEventTime(ev){
+  const s=new Date(ev.start_iso),e=new Date(ev.end_iso);
+  if(ev.all_day)return"All day";
+  return `${s.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}–${e.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`;
+}
+
+async function openCalendar(){
+  if(!calendarWeekStart)calendarWeekStart=startOfWeek(new Date());
+  openModal("calendar-modal");
+  await loadCalendarAccounts();
+  await loadCalendarEvents();
+}
+
+async function loadCalendarAccounts(){
+  const sel=document.getElementById("calendar-account-filter");
+  const accounts=await fetch("/api/calendar/accounts").then(r=>r.json());
+  sel.innerHTML='<option value="">All calendar accounts</option>'+accounts.map(a=>{
+    const label=`${a.name} · ${a.provider?.name||"Calendar"}`;
+    return `<option value="${escHtml(a.id)}">${escHtml(label)}</option>`;
+  }).join("");
+  if(!accounts.length)sel.innerHTML='<option value="">No calendar accounts configured</option>';
+}
+
+async function loadCalendarEvents(){
+  const {start,end}=calendarWindow();
+  const accountId=document.getElementById("calendar-account-filter").value;
+  const qs=new URLSearchParams({start:start.toISOString(),end:end.toISOString()});
+  if(accountId)qs.set("account_id",accountId);
+  calendarEvents=await fetch(`/api/calendar/events?${qs.toString()}`).then(r=>r.json());
+  const labelEnd=new Date(end);labelEnd.setDate(labelEnd.getDate()-1);
+  document.getElementById("calendar-window-label").textContent=`${formatCalendarDate(start)} – ${formatCalendarDate(labelEnd)}`;
+  renderCalendarEvents();
+}
+
+function renderCalendarEvents(){
+  const wrap=document.getElementById("calendar-days");
+  const detail=document.getElementById("calendar-detail");
+  if(!Array.isArray(calendarEvents)||!calendarEvents.length){
+    wrap.innerHTML='<div style="color:var(--dim);font-size:11px;padding:12px;">No calendar events in this week. Sync the calendar or move to another week.</div>';
+    detail.textContent="Calendar data is stored locally and is available to the LLM after sync.";
+    return;
+  }
+  const {start}=calendarWindow();
+  const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(start.getDate()+i);return d;});
+  const hours=Array.from({length:12},(_,i)=>i+7);
+  const dayCols=weekDays.map(()=>[]);
+  const allDayCols=weekDays.map(()=>[]);
+  for(const ev of calendarEvents){
+    const d=new Date(ev.start_iso);
+    const eventDay=new Date(d);
+    eventDay.setHours(0,0,0,0);
+    const idx=Math.floor((eventDay-start)/86400000);
+    if(ev.all_day){
+      const allDayEnd=new Date(ev.end_iso);
+      allDayEnd.setHours(0,0,0,0);
+      if(allDayEnd<=eventDay)allDayEnd.setDate(eventDay.getDate()+1);
+      for(let i=0;i<7;i++){
+        const dayStart=weekDays[i];
+        const dayEnd=new Date(dayStart);dayEnd.setDate(dayStart.getDate()+1);
+        if(eventDay<dayEnd&&allDayEnd>dayStart)allDayCols[i].push(ev);
+      }
+    }else{
+      if(idx<0||idx>6)continue;
+      dayCols[idx].push(ev);
+    }
+  }
+  const now=new Date();
+  const nowMinutes=now.getHours()*60+now.getMinutes();
+  const todayKey=now.toDateString();
+  const showNow=now>=weekDays[0]&&now<new Date(weekDays[6].getTime()+86400000)&&now.getHours()>=7&&now.getHours()<19;
+  const nowTop=((nowMinutes-7*60)/60)*48;
+  wrap.innerHTML=`
+    <div class="calendar-week">
+      <div class="calendar-week-header">
+        <div class="cal-time-head"></div>
+        ${weekDays.map(d=>`<div class="cal-day-head ${d.toDateString()===todayKey?"today":""}">${escHtml(d.toLocaleDateString([],{weekday:"short"}))}<strong>${d.getDate()}</strong></div>`).join("")}
+      </div>
+      <div class="calendar-all-day-row">
+        <div class="cal-all-day-label">all-day</div>
+        ${allDayCols.map((events,idx)=>`<div class="cal-all-day-cell ${weekDays[idx].toDateString()===todayKey?"today":""}">${events.map(ev=>`<button class="cal-all-day" data-event-id="${escHtml(ev.uid)}" data-event-start="${escHtml(ev.start_iso)}">${escHtml(ev.title||"(busy)")}</button>`).join("")}</div>`).join("")}
+      </div>
+      <div class="calendar-grid">
+        <div class="cal-time-col">${hours.map(h=>`<div class="cal-time-slot">${String(h).padStart(2,"0")}:00</div>`).join("")}</div>
+        ${dayCols.map((events,idx)=>`<div class="cal-day-col ${weekDays[idx].toDateString()===todayKey?"today":""}" data-day="${idx}">${layoutDayEvents(events).map((item)=>eventBlockHtml(item)).join("")}</div>`).join("")}
+        ${showNow?`<div class="cal-now-line" style="top:${nowTop}px"></div>`:""}
+      </div>
+    </div>`;
+  wrap.querySelectorAll(".cal-event-block,.cal-all-day").forEach(btn=>btn.addEventListener("click",()=>{
+    wrap.querySelectorAll(".cal-event-block,.cal-all-day").forEach(x=>x.classList.remove("active"));
+    btn.classList.add("active");
+    const ev=calendarEvents.find(x=>x.uid===btn.dataset.eventId&&x.start_iso===btn.dataset.eventStart);
+    if(!ev)return;
+    detail.innerHTML=calendarDetailHtml(ev);
+  }));
+  wrap.querySelector(".cal-event-block,.cal-all-day")?.click();
+}
+
+function eventMinutes(ev){
+  const start=new Date(ev.start_iso),end=new Date(ev.end_iso);
+  return {
+    startMin:start.getHours()*60+start.getMinutes(),
+    endMin:end.getHours()*60+end.getMinutes(),
+  };
+}
+
+function layoutDayEvents(events){
+  const sorted=[...events].sort((a,b)=>new Date(a.start_iso)-new Date(b.start_iso)||new Date(a.end_iso)-new Date(b.end_iso));
+  const laidOut=[];
+  let cluster=[];
+  let clusterEnd=-1;
+  const flush=()=>{
+    if(!cluster.length)return;
+    const columns=[];
+    const clusterItems=cluster.map(ev=>{
+      const mins=eventMinutes(ev);
+      let column=columns.findIndex(end=>end<=mins.startMin);
+      if(column<0){column=columns.length;columns.push(mins.endMin);}
+      else columns[column]=mins.endMin;
+      return {ev,column};
+    });
+    const total=Math.max(1,columns.length);
+    clusterItems.forEach(item=>laidOut.push({...item,total}));
+    cluster=[];
+    clusterEnd=-1;
+  };
+  for(const ev of sorted){
+    const mins=eventMinutes(ev);
+    if(cluster.length&&mins.startMin>=clusterEnd)flush();
+    cluster.push(ev);
+    clusterEnd=Math.max(clusterEnd,mins.endMin);
+  }
+  flush();
+  return laidOut;
+}
+
+function eventBlockHtml(item){
+  const ev=item.ev||item;
+  const {startMin,endMin}=eventMinutes(ev);
+  if(endMin<=7*60||startMin>=19*60)return "";
+  const visibleStart=Math.max(startMin,7*60);
+  const visibleEnd=Math.min(endMin,19*60);
+  const top=((visibleStart-7*60)/60)*48;
+  const height=Math.max(22,((visibleEnd-visibleStart)/60)*48);
+  const total=item.total||1;
+  const column=item.column||0;
+  const gap=4;
+  const width=`calc(${100/total}% - ${gap}px)`;
+  const left=`calc(${(100/total)*column}% + ${gap/2}px)`;
+  const classes=["cal-event-block"];
+  if(height<34)classes.push("compact");
+  if(total>1)classes.push("overlapping");
+  if(total>2)classes.push("narrow");
+  return `<button class="${classes.join(" ")}" style="--event-height:${height}px;top:${top}px;height:var(--event-height);left:${left};width:${width};right:auto;" data-event-id="${escHtml(ev.uid)}" data-event-start="${escHtml(ev.start_iso)}">
+    <span class="cal-event-title">${escHtml(ev.title||"(busy)")}</span>
+    <span class="cal-event-time">${escHtml(formatCalendarEventTime(ev))}</span>
+  </button>`;
+}
+
+function calendarDetailHtml(ev){
+  const title=escHtml(ev.title||"(busy)");
+  const time=escHtml(formatCalendarEventTime(ev));
+  const dateRange=escHtml(`${new Date(ev.start_iso).toLocaleDateString([],{weekday:"short",year:"numeric",month:"short",day:"numeric"})} · ${new Date(ev.start_iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} – ${new Date(ev.end_iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`);
+  const busyMatch=(ev.description||"").match(/^Free\/busy:\s*(.+)$/i);
+  const busyStatus=ev.free_busy||(busyMatch?busyMatch[1]:"");
+  const visibleDescription=busyMatch?"":(ev.description||"");
+  const location=ev.location?`<span class="cal-detail-pill">${escHtml(ev.location)}</span>`:"";
+  const account=ev.account_id?`<span class="cal-detail-pill">${escHtml(ev.account_id)}</span>`:"";
+  const status=busyStatus?`<span class="cal-detail-pill">${escHtml(busyStatus)}</span>`:"";
+  const description=visibleDescription?`<div class="cal-detail-description">${escHtml(visibleDescription)}</div>`:"";
+  return `<div class="cal-detail-card">
+    <div class="cal-detail-main">
+      <div class="cal-detail-title">${title}</div>
+      <div class="cal-detail-time">${time}</div>
+      <div class="cal-detail-date">${dateRange}</div>
+    </div>
+    <div class="cal-detail-meta">${location}${account}${status}</div>
+    ${description}
+  </div>`;
+}
+
+document.getElementById("calendar-account-filter").addEventListener("change",loadCalendarEvents);
+document.getElementById("btn-calendar-prev").addEventListener("click",()=>{calendarWeekStart=calendarWeekStart||startOfWeek(new Date());calendarWeekStart.setDate(calendarWeekStart.getDate()-7);loadCalendarEvents();});
+document.getElementById("btn-calendar-next").addEventListener("click",()=>{calendarWeekStart=calendarWeekStart||startOfWeek(new Date());calendarWeekStart.setDate(calendarWeekStart.getDate()+7);loadCalendarEvents();});
+document.getElementById("btn-calendar-today").addEventListener("click",()=>{calendarWeekStart=startOfWeek(new Date());loadCalendarEvents();});
+document.getElementById("btn-calendar-sync").addEventListener("click",()=>{
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const accountId=document.getElementById("calendar-account-filter").value;
+  fetch("/api/calendar/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_id:accountId||undefined})})
+    .then(()=>startTaskPoll("Calendar sync",4,()=>loadCalendarEvents()))
+    .catch(err=>setStatus("Calendar sync error: "+err.message,"err"));
+});
 
 // ─── Debug log modal ──────────────────────────────────────────────────────
 let debugEntries=[];

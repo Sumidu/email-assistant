@@ -21,6 +21,7 @@ from app import llm_providers
 from app import prompt_defaults
 
 from .knowledge_builder import KnowledgeBuilder, KNOWLEDGE_DIR
+from . import calendar_store
 from . import llm_logger
 
 import os
@@ -79,6 +80,20 @@ class ResponseGenerator:
             prompts["response_system"],
             {"kb_text": kb_text},
         )
+
+    @staticmethod
+    def _wants_calendar_context(messages: list, email_data: dict | None = None) -> bool:
+        text = " ".join(str(m.get("content", "")) for m in messages[-4:]).lower()
+        if email_data:
+            text += " " + " ".join([
+                str(email_data.get("subject", "")),
+                str(email_data.get("body_text", ""))[:2500],
+            ]).lower()
+        terms = (
+            "calendar", "meeting", "slot", "available", "availability", "schedule",
+            "termin", "kalender", "verfügbar", "frei", "besprechung",
+        )
+        return any(term in text for term in terms)
 
     @staticmethod
     def _parse(raw: str) -> dict:
@@ -150,6 +165,16 @@ class ResponseGenerator:
                 knowledge.append((label, content))
                 seen.add(filename)
         system = self._build_system(knowledge)
+        if self._wants_calendar_context(messages, email_data):
+            cal_ctx = calendar_store.calendar_context(self.config)
+            if not cal_ctx:
+                cal_ctx = "=== LOCAL CALENDAR CONTEXT ===\nNo local calendar events are currently synced."
+            system += (
+                "\n\n"
+                "Calendar data below is local read-only context. Use it only to answer scheduling "
+                "questions or draft meeting-time replies. If no local calendar events are synced, say so instead of guessing.\n"
+                f"{cal_ctx}"
+            )
 
         email_ctx = f"=== EMAIL BEING REPLIED TO ===\n{self._email_context(email_data)}"
         full_messages = (

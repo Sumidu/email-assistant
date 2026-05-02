@@ -71,6 +71,23 @@ def init_db():
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
         CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            account_id  TEXT NOT NULL,
+            uid         TEXT NOT NULL,
+            occurrence  TEXT NOT NULL,
+            title       TEXT,
+            start_ts    REAL NOT NULL,
+            end_ts      REAL NOT NULL,
+            start_iso   TEXT NOT NULL,
+            end_iso     TEXT NOT NULL,
+            all_day     INTEGER DEFAULT 0,
+            location    TEXT,
+            description TEXT,
+            source      TEXT,
+            updated_at  TEXT,
+            PRIMARY KEY (account_id, uid, occurrence)
+        );
+        CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
     """)
 
     # Migrate: prefix existing IDs with 'default::' to match the composite-ID scheme
@@ -365,5 +382,60 @@ def get_folders(account_id=None):
             "SELECT folder, COUNT(*) as count, account_id FROM emails "
             "GROUP BY account_id, folder ORDER BY account_id, count DESC"
         ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def replace_calendar_events(account_id: str, events: list[dict], start_ts: float, end_ts: float) -> None:
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM calendar_events WHERE account_id = ? AND start_ts >= ? AND start_ts <= ?",
+        (account_id, start_ts, end_ts),
+    )
+    rows = []
+    now = datetime.now().isoformat()
+    for event in events:
+        rows.append((
+            account_id,
+            event.get("uid", ""),
+            event.get("occurrence", event.get("start_iso", "")),
+            event.get("title", ""),
+            float(event.get("start_ts", 0)),
+            float(event.get("end_ts", 0)),
+            event.get("start_iso", ""),
+            event.get("end_iso", ""),
+            1 if event.get("all_day") else 0,
+            event.get("location", ""),
+            event.get("description", ""),
+            event.get("source", ""),
+            now,
+        ))
+    conn.executemany(
+        """INSERT OR REPLACE INTO calendar_events
+           (account_id, uid, occurrence, title, start_ts, end_ts, start_iso, end_iso,
+            all_day, location, description, source, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_calendar_events(account_id=None, start_ts=None, end_ts=None, limit=500):
+    conn = get_connection()
+    query = "SELECT * FROM calendar_events WHERE 1=1"
+    params = []
+    if account_id:
+        query += " AND account_id = ?"
+        params.append(account_id)
+    if start_ts is not None:
+        query += " AND end_ts >= ?"
+        params.append(float(start_ts))
+    if end_ts is not None:
+        query += " AND start_ts <= ?"
+        params.append(float(end_ts))
+    query += " ORDER BY start_ts ASC LIMIT ?"
+    params.append(int(limit))
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]

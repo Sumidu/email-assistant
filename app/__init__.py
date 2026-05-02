@@ -6,6 +6,7 @@ from flask import Flask, render_template
 def create_app(base_dir: str) -> Flask:
     from app.routes.accounts import bp as accounts_bp
     from app.routes.chat import bp as chat_bp
+    from app.routes.calendar import bp as calendar_bp
     from app.routes.config import bp as config_bp
     from app.routes.emails import bp as emails_bp
     from app.routes.folders import bp as folders_bp
@@ -30,6 +31,7 @@ def create_app(base_dir: str) -> Flask:
         tasks_bp,
         knowledge_bp,
         config_bp,
+        calendar_bp,
         chat_bp,
         logs_bp,
     ):

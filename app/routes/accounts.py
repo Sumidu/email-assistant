@@ -19,6 +19,8 @@ def list_accounts():
         account = json.loads(json.dumps(acct))
         if account.get("imap", {}).get("password"):
             account["imap"]["password"] = "••••••••"
+        if account.get("imap", {}).get("calendar_url"):
+            account["imap"]["calendar_url"] = "••••••••"
         safe.append(account)
     return jsonify(safe)
 
@@ -42,6 +44,12 @@ def create_account():
             "inbox_folder": "INBOX",
             "sent_folder": "Sent Items",
             "provider_override": "auto",
+            "calendar_enabled": False,
+            "calendar_method": "ics",
+            "calendar_url": "",
+            "ews_url": "",
+            "graph_client_id": "",
+            "graph_tenant_id": "common",
             "fetch_limit": 300,
             "sync_mode": "recent",
             "sync_since": "",
@@ -84,6 +92,8 @@ def update_account(account_id):
                 if v and v != "••••••••":
                     keychain_store.set_imap_password(account_id, v)
                     acct["imap"]["password"] = v
+            elif k == "calendar_url" and v == "••••••••":
+                continue
             else:
                 acct["imap"][k] = v
 
