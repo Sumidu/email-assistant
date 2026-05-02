@@ -1261,9 +1261,20 @@ document.getElementById("btn-sync").addEventListener("click",()=>{
   const n=accountsCache.length*3;
   fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,()=>loadFolders())).catch(err=>setStatus("Sync error: "+err.message,"err"));
 });
-document.getElementById("btn-build-kb").addEventListener("click",()=>{
-  // knowledge build: style + up to 40 contacts
-  fetch("/api/build_knowledge",{method:"POST"}).then(()=>startTaskPoll("Knowledge build",42,()=>{})).catch(err=>setStatus("Error: "+err.message,"err"));
+document.getElementById("btn-build-kb").addEventListener("click",async()=>{
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  try{
+    const stats=await fetch("/api/knowledge_stats").then(r=>r.json());
+    const total=stats.total_messages||0,newMessages=stats.new_messages||0;
+    const msg=[
+      "Update the full local knowledge base?",
+      "",
+      `This will scan ${total} local message${total===1?"":"s"} and parse ${newMessages} new/unprocessed message${newMessages===1?"":"s"} for writing style and contact profiles.`,
+      "This can take a while and will use the active LLM.",
+    ].join("\n");
+    if(!confirm(msg))return;
+    fetch("/api/build_knowledge",{method:"POST"}).then(()=>startTaskPoll("Knowledge base update",42,()=>{})).catch(err=>setStatus("Error: "+err.message,"err"));
+  }catch(err){setStatus("Knowledge update failed: "+err.message,"err");}
 });
 document.getElementById("btn-view-kb").addEventListener("click",openKnowledge);
 document.getElementById("btn-settings").addEventListener("click",()=>{loadSettings();openModal("settings-modal");settingsFooterMode("list");switchTab("tab-accounts");});

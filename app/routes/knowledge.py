@@ -20,6 +20,14 @@ def build_knowledge():
     return jsonify({"status": "started"})
 
 
+@bp.route("/knowledge_stats")
+def knowledge_stats():
+    return jsonify({
+        "total_messages": database.get_email_count(),
+        "new_messages": len(database.get_unprocessed_kb_emails()),
+    })
+
+
 @bp.route("/email/<path:email_id>/build_contact_knowledge", methods=["POST"])
 def build_contact_knowledge(email_id):
     if task_status["running"]:
