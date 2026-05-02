@@ -240,13 +240,15 @@ function renderEmailList(emails,append=false){
     const div=document.createElement("div");div.className="email-item";div.dataset.id=e.id;
     const matches=e.knowledge_matches||[];
     const badgeTitle=matches.length?`Knowledge: ${matches.map(m=>m.email||m.name).join(", ")}`:"";
-    const badge=matches.length?`<span class="ei-kb-badge" title="${escHtml(badgeTitle)}">&#9670; KB</span>`:"";
+    const primaryKb=matches[0]?.file||"";
+    const badge=matches.length?`<button class="ei-kb-badge" data-kb-file="${escHtml(primaryKb)}" title="${escHtml(badgeTitle)}">&#9670; KB</button>`:"";
     const isFinished=(e.folder||currentFolder)==="Finished";
     const action=isFinished
       ?`<button class="ei-finish-btn unfinish" data-unfinish-id="${escHtml(e.id)}" title="Unarchive">&#8634;</button>`
       :`<button class="ei-finish-btn" data-finish-id="${escHtml(e.id)}" title="Done">&#10003;</button>`;
     div.innerHTML=`<div class="ei-main"><div class="ei-from"><span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span></div></div>${action}`;
     div.addEventListener("click",()=>openEmail(e.id,div));
+    div.querySelector("[data-kb-file]")?.addEventListener("click",ev=>{ev.stopPropagation();openKnowledge(ev.currentTarget.dataset.kbFile);});
     div.querySelector("[data-finish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailDone(e.id,{fromList:true});});
     div.querySelector("[data-unfinish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();unarchiveEmail(e.id,{fromList:true});});
     emailListEl.appendChild(div);
@@ -601,17 +603,18 @@ const kbEditContent=document.getElementById("kb-edit-content");
 const kbFilelist=document.getElementById("kb-filelist");
 const kbLlmFilterEl=document.getElementById("kb-llm-filter");
 
-async function openKnowledge(){
+async function openKnowledge(preferredFileName=null){
   openModal("kb-modal");
   enterKbViewMode();
-  await reloadKbFiles();
+  if(preferredFileName)kbLlmFilter="all";
+  await reloadKbFiles(preferredFileName);
 }
 
-async function reloadKbFiles(){
+async function reloadKbFiles(preferredFileName=null){
   try{
     kbFiles=await fetch("/api/knowledge_files").then(r=>r.json());
     renderKbFilters();
-    renderKbList();
+    renderKbList(preferredFileName);
   }catch{kbFilelist.innerHTML='<div style="color:var(--red);padding:12px;font-size:10.5px;">Error loading files.</div>';}
 }
 
@@ -640,7 +643,7 @@ function filteredKbFiles(){
   return kbFiles.filter(f=>f.metadata?.llm_id===kbLlmFilter);
 }
 
-function renderKbList(){
+function renderKbList(preferredFileName=null){
   const visible=filteredKbFiles();
   if(!visible.length){kbFilelist.innerHTML='<div style="padding:12px;color:var(--dim);font-size:10.5px;">No files match this filter.</div>';return;}
   const pinned=visible.filter(f=>f.pinned),unpinned=visible.filter(f=>!f.pinned);
@@ -662,11 +665,12 @@ function renderKbList(){
   });
   kbFilelist.querySelectorAll(".kf-del").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();deleteKbFile(btn.dataset.name);}));
   kbFilelist.querySelectorAll(".kf-pin").forEach(btn=>btn.addEventListener("click",e=>{e.stopPropagation();togglePin(btn.dataset.name);}));
-  const first=kbFilelist.querySelector(".kb-file-item");if(first)first.click();
+  const target=preferredFileName?kbFilelist.querySelector(`.kb-file-item[data-name="${CSS.escape(preferredFileName)}"]`):null;
+  const first=target||kbFilelist.querySelector(".kb-file-item");if(first)first.click();
 }
 
 function kbFileItemHtml(f,idx){
-  return `<div class="kb-file-item${f.pinned?" pinned":""}" data-idx="${idx}">
+  return `<div class="kb-file-item${f.pinned?" pinned":""}" data-idx="${idx}" data-name="${escHtml(f.name)}">
     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span>${escHtml(f.name)}</span><small>${escHtml(kbMetaLabel(f))}</small></span>
     <button class="kf-pin" data-name="${escHtml(f.name)}" title="${f.pinned?"Unpin (remove from all prompts)":"Pin (always include in prompts)"}">${f.pinned?"&#9670;":"&#9671;"}</button>
     <button class="kf-del" data-name="${escHtml(f.name)}" title="Delete">&#215;</button>
