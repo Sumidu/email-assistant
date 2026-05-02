@@ -17,52 +17,14 @@ import re
 
 import requests
 
+from app import llm_providers
+from app import prompt_defaults
+
 from .knowledge_builder import KnowledgeBuilder, KNOWLEDGE_DIR
 from . import llm_logger
 
 import os
 
-
-_ASCII_RULE = (
-    "CRITICAL: Use ASCII characters ONLY inside <draft>. No Unicode, no smart quotes, "
-    "no en-dashes, no em-dashes, no ellipsis character. "
-    "Use straight quotes (\") and hyphens (-) instead of typographic alternatives."
-)
-
-_SYSTEM_PROMPT = """\
-You are an email assistant helping the user draft and refine email replies.
-
-RESPONSE FORMAT — you MUST always use these XML tags:
-
-<draft>
-[The complete email draft. Include ONLY when providing or updating a draft.
-Omit this tag entirely if the user is just asking a question.]
-</draft>
-<chat>
-[Your conversational reply — explanations, questions, suggestions, reasoning.
-ALWAYS include this tag.]
-</chat>
-
-Optionally, to save something to the knowledge base:
-<kb_save filename="short_slug">
-[Markdown content to save as a knowledge file]
-</kb_save>
-
-To look up the knowledge base before responding, use ONE of these query tags
-INSTEAD of <chat>/<draft> — the app will reply with the result and you continue:
-<kb_list/>
-<kb_read filename="exact_filename.md"/>
-
-RULES:
-- <chat> is REQUIRED in every final response (after any KB queries are resolved).
-- <draft> is optional — only include it when you are setting or changing the email draft.
-- Inside <draft>: {ascii_rule}
-- Inside <chat>: write naturally, reasoning is welcome.
-- Match the user's established tone, greeting, and sign-off exactly.
-- Never add placeholders like [Your Name] unless the style guide uses them.
-- Keep drafts concise and natural — never sound like a template.
-
-{kb_text}"""
 
 _MAX_KB_HOPS = 3  # max KB query round-trips per turn
 
@@ -70,14 +32,14 @@ _MAX_KB_HOPS = 3  # max KB query round-trips per turn
 class ResponseGenerator:
     def __init__(self, config: dict):
         self.config = config
-        self.lm     = config["lm_studio"]
         self.kb     = KnowledgeBuilder(config)
 
     # ── LLM calls ────────────────────────────────────────────────────────────
 
     def _call_messages(self, messages: list, max_tokens: int = 2000) -> str:
-        model = self.lm.get("model", "local-model")
-        url   = f"{self.lm['base_url']}/v1/chat/completions"
+        lm = llm_providers.get_active_llm(self.config)
+        model = lm.get("model", "local-model")
+        url   = f"{lm['base_url']}/v1/chat/completions"
         payload = {
             "model":       model,
             "messages":    messages,
@@ -85,8 +47,8 @@ class ResponseGenerator:
             "temperature": 0.7,
         }
         headers = {}
-        if self.lm.get("api_key"):
-            headers["Authorization"] = f"Bearer {self.lm['api_key']}"
+        if lm.get("api_key"):
+            headers["Authorization"] = f"Bearer {lm['api_key']}"
         resp = requests.post(url, json=payload, headers=headers, timeout=180)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -112,7 +74,11 @@ class ResponseGenerator:
         kb_text = ""
         for title, content in knowledge:
             kb_text += f"\n\n=== {title} ===\n{content[:2000]}"
-        return _SYSTEM_PROMPT.format(ascii_rule=_ASCII_RULE, kb_text=kb_text)
+        prompts = prompt_defaults.ensure_prompts(self.config)
+        return prompt_defaults.render_prompt(
+            prompts["response_system"],
+            {"kb_text": kb_text},
+        )
 
     @staticmethod
     def _parse(raw: str) -> dict:
@@ -199,7 +165,7 @@ class ResponseGenerator:
                 raw    = self._call_messages(full_messages)
                 result = self._parse(raw)
                 llm_logger.log("chat", system, str(full_messages[-1:]), raw,
-                               model=self.lm.get("model", ""))
+                               model=llm_providers.get_active_llm(self.config).get("model", ""))
 
                 if not result["kb_query"] or hop == _MAX_KB_HOPS:
                     break

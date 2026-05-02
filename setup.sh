@@ -32,25 +32,30 @@ pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
 # ── Config ────────────────────────────────────────────────────────────────
-if [ ! -f "config.json" ]; then
-  cp config.json.example config.json
+CONFIG_DIR="$HOME/email_assistant"
+CONFIG_PATH="$CONFIG_DIR/config.json"
+mkdir -p "$CONFIG_DIR"
+
+if [ ! -f "$CONFIG_PATH" ]; then
+  cp config.json.example "$CONFIG_PATH"
   echo ""
-  echo "  [!] config.json created from example."
-  echo "      Edit it with your IMAP credentials before running."
+  echo "  [!] Config created from example:"
+  echo "      $CONFIG_PATH"
+  echo "      You can also configure accounts from Settings in the app."
   echo ""
 else
-  echo "  config.json already exists — skipping."
+  echo "  Config already exists — skipping: $CONFIG_PATH"
 fi
 
 # ── Knowledge dir ─────────────────────────────────────────────────────────
-mkdir -p ~/email_assistant/knowledge
-echo "  Knowledge directory: ~/email_assistant/knowledge"
+mkdir -p "$CONFIG_DIR/knowledge"
+echo "  Knowledge directory: $CONFIG_DIR/knowledge"
 
 echo ""
 echo "  Setup complete!"
 echo ""
 echo "  Next steps:"
-echo "    1. Edit config.json with your email credentials"
+echo "    1. Start the app and open Settings to add your email account"
 echo "    2. Start LM Studio and load a model (server on port 1234)"
 echo "    3. Run:  ./run.sh"
 echo ""

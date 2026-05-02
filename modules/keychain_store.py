@@ -10,6 +10,9 @@ config["keychain_version"] so a fresh install skips old steps.
 
 import copy
 import keyring
+from keyring.errors import KeyringError
+
+from app.llm_providers import MASK
 
 SERVICE          = "com.emailassistant.app"
 KEYCHAIN_VERSION = 1   # bump this when adding new secret fields
@@ -21,7 +24,11 @@ def _set(key: str, value: str):
     keyring.set_password(SERVICE, key, value or "")
 
 def _get(key: str) -> str:
-    return keyring.get_password(SERVICE, key) or ""
+    try:
+        return keyring.get_password(SERVICE, key) or ""
+    except KeyringError as exc:
+        print(f"[Keychain] Could not read {key}: {exc}")
+        return ""
 
 def _delete(key: str):
     try:
@@ -50,6 +57,15 @@ def get_api_key() -> str:
 def set_api_key(api_key: str):
     _set("lm_studio.api_key", api_key)
 
+def _llm_api_key_key(llm_id: str) -> str:
+    return f"llm.{llm_id}.api_key"
+
+def get_llm_api_key(llm_id: str) -> str:
+    return _get(_llm_api_key_key(llm_id))
+
+def set_llm_api_key(llm_id: str, api_key: str):
+    _set(_llm_api_key_key(llm_id), api_key)
+
 
 # ── Migration ────────────────────────────────────────────────────────────────
 
@@ -71,6 +87,10 @@ def migrate(config: dict, save_fn) -> None:
         api_key = config.get("lm_studio", {}).get("api_key", "")
         if api_key and api_key != "••••••••":
             set_api_key(api_key)
+        for provider in config.get("llms", []):
+            api_key = provider.get("api_key", "")
+            if api_key and api_key != MASK:
+                set_llm_api_key(provider["id"], api_key)
 
     # Future migrations go here:
     # if current < 2:
@@ -91,7 +111,10 @@ def inject_secrets(config: dict) -> None:
     """
     for acct in config.get("accounts", []):
         acct.setdefault("imap", {})["password"] = get_imap_password(acct["id"])
-    config.setdefault("lm_studio", {})["api_key"] = get_api_key()
+    legacy_api_key = get_api_key()
+    config.setdefault("lm_studio", {})["api_key"] = legacy_api_key
+    for provider in config.get("llms", []):
+        provider["api_key"] = get_llm_api_key(provider["id"]) or legacy_api_key
 
 
 # ── Safe serialisation ───────────────────────────────────────────────────────
@@ -107,4 +130,7 @@ def strip_secrets(config: dict) -> dict:
         acct["imap"]["password"] = ""
     safe.get("lm_studio", {}).pop("api_key", None)
     safe.setdefault("lm_studio", {})["api_key"] = ""
+    for provider in safe.get("llms", []):
+        provider.pop("api_key", None)
+        provider["api_key"] = ""
     return safe

@@ -11,6 +11,7 @@ import hashlib
 import html
 import imaplib
 import re
+from datetime import datetime
 
 from . import database
 
@@ -106,6 +107,33 @@ class IMAPFetcher:
 
     # ---- fetching ----------------------------------------------------------
 
+    def _uidvalidity(self, conn) -> str:
+        try:
+            data = conn.response("UIDVALIDITY")[1]
+            if data and data[0]:
+                return data[0].decode() if isinstance(data[0], bytes) else str(data[0])
+        except Exception:
+            pass
+        return ""
+
+    def _search_uids(self, conn, mode: str, limit: int, since_date: str, last_seen_uid: int) -> list[bytes]:
+        if last_seen_uid > 0:
+            status, data = conn.uid("search", None, "UID", f"{last_seen_uid + 1}:*")
+        elif mode == "since" and since_date:
+            try:
+                parsed = datetime.fromisoformat(since_date).strftime("%d-%b-%Y")
+            except Exception:
+                parsed = since_date
+            status, data = conn.uid("search", None, "SINCE", parsed)
+        else:
+            status, data = conn.uid("search", None, "ALL")
+        if status != "OK" or not data:
+            return []
+        uids = data[0].split()
+        if mode == "recent" and limit > 0 and last_seen_uid <= 0:
+            uids = uids[-limit:]
+        return uids
+
     def _fetch_folder(self, conn, folder_name: str, limit: int) -> int:
         try:
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
@@ -116,14 +144,26 @@ class IMAPFetcher:
             print(f"[IMAP:{self.account_id}] select error for {folder_name!r}: {exc}")
             return 0
 
-        _, data = conn.search(None, "ALL")
-        uids = data[0].split()
-        uids = uids[-limit:]
+        uidvalidity = self._uidvalidity(conn)
+        mode = self.imap_cfg.get("sync_mode", "recent")
+        since_date = self.imap_cfg.get("sync_since", "")
+        state = database.get_sync_state(self.account_id, folder_name)
+        last_seen_uid = 0
+        if state and state.get("uidvalidity") == uidvalidity:
+            last_seen_uid = int(state.get("last_seen_uid") or 0)
+
+        uids = self._search_uids(conn, mode, limit, since_date, last_seen_uid)
         count = 0
+        max_seen_uid = last_seen_uid
 
         for uid in reversed(uids):
             try:
-                _, msg_data = conn.fetch(uid, "(RFC822)")
+                uid_int = int(uid)
+                max_seen_uid = max(max_seen_uid, uid_int)
+                if uidvalidity and database.email_uid_exists(self.account_id, folder_name, uidvalidity, uid_int):
+                    continue
+
+                _, msg_data = conn.uid("fetch", uid, "(RFC822)")
                 raw = msg_data[0][1]
                 msg = email.message_from_bytes(raw)
 
@@ -150,6 +190,11 @@ class IMAPFetcher:
                 ]
 
                 body_text, body_html = extract_bodies(msg)
+                storage = self.imap_cfg.get("body_storage", "text_html")
+                if storage == "text_only":
+                    body_html = ""
+                elif storage == "headers_only":
+                    body_text, body_html = "", ""
 
                 database.save_email({
                     "id":         composite_id,
@@ -163,6 +208,8 @@ class IMAPFetcher:
                     "body_html":  body_html,
                     "message_id": raw_id,
                     "in_reply_to": (msg.get("In-Reply-To") or "").strip(),
+                    "imap_uid":   uid_int,
+                    "uidvalidity": uidvalidity,
                 })
                 count += 1
 
@@ -170,6 +217,8 @@ class IMAPFetcher:
                 print(f"[IMAP:{self.account_id}] Error on uid {uid}: {exc}")
                 continue
 
+        if uids:
+            database.save_sync_state(self.account_id, folder_name, uidvalidity, max_seen_uid)
         return count
 
     # ---- IMAP folder discovery ---------------------------------------------

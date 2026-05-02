@@ -1,0 +1,47 @@
+from flask import Blueprint, jsonify, request
+
+from app import runtime as rt
+from modules import database
+
+
+bp = Blueprint("emails", __name__, url_prefix="/api")
+
+
+@bp.route("/emails")
+def emails():
+    limit = int(request.args.get("limit", 60))
+    offset = int(request.args.get("offset", 0))
+    account_id = request.args.get("account_id") or None
+    folder = request.args.get("folder") or "INBOX"
+    rows = database.get_emails(
+        folder=folder,
+        limit=limit,
+        offset=offset,
+        account_id=account_id,
+    )
+    if rt.kb:
+        for row in rows:
+            row["knowledge_matches"] = rt.kb.knowledge_matches_for_email(row)
+    return jsonify(rows)
+
+
+@bp.route("/email/<path:email_id>")
+def email_detail(email_id):
+    data = database.get_email_by_id(email_id)
+    if not data:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(data)
+
+
+@bp.route("/email/<path:email_id>/done", methods=["POST"])
+def mark_email_done(email_id):
+    result = database.mark_email_done(email_id)
+    status = 200 if result.get("success") else 404
+    return jsonify(result), status
+
+
+@bp.route("/email/<path:email_id>/done", methods=["DELETE"])
+def unmark_email_done(email_id):
+    result = database.unmark_email_done(email_id)
+    status = 200 if result.get("success") else 404
+    return jsonify(result), status

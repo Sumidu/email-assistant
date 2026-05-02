@@ -12,24 +12,35 @@ from datetime import datetime
 
 import requests
 
+from app import llm_providers
+from app import prompt_defaults
+
 from . import database
 from . import llm_logger
 
 KNOWLEDGE_DIR = os.path.expanduser("~/email_assistant/knowledge")
 PINS_PATH = os.path.join(KNOWLEDGE_DIR, "_pinned.json")
+METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
 
 
 class KnowledgeBuilder:
     def __init__(self, config: dict):
         self.config = config
-        self.lm = config["lm_studio"]
+        self._last_llm = None
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 
     # ---- LLM call ----------------------------------------------------------
 
     def _call_llm(self, system: str, user: str, max_tokens: int = 2000) -> str:
-        model = self.lm.get("model", "local-model")
-        url = f"{self.lm['base_url']}/v1/chat/completions"
+        lm = llm_providers.get_active_llm(self.config)
+        self._last_llm = {
+            "id": lm.get("id", ""),
+            "name": lm.get("name", ""),
+            "model": lm.get("model", ""),
+            "base_url": lm.get("base_url", ""),
+        }
+        model = lm.get("model", "local-model")
+        url = f"{lm['base_url']}/v1/chat/completions"
         payload = {
             "model": model,
             "messages": [
@@ -40,13 +51,49 @@ class KnowledgeBuilder:
             "temperature": 0.3,
         }
         headers = {}
-        if self.lm.get("api_key"):
-            headers["Authorization"] = f"Bearer {self.lm['api_key']}"
+        if lm.get("api_key"):
+            headers["Authorization"] = f"Bearer {lm['api_key']}"
         resp = requests.post(url, json=payload, headers=headers, timeout=180)
         resp.raise_for_status()
         response = resp.json()["choices"][0]["message"]["content"]
         llm_logger.log("knowledge", system, user, response, model=model)
         return response
+
+    def _current_llm_metadata(self, source: str) -> dict:
+        lm = self._last_llm or llm_providers.get_active_llm(self.config)
+        return {
+            "source": source,
+            "llm_id": lm.get("id", ""),
+            "llm_name": lm.get("name", ""),
+            "model": lm.get("model", ""),
+            "base_url": lm.get("base_url", ""),
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    def _load_metadata(self) -> dict:
+        if not os.path.exists(METADATA_PATH):
+            return {}
+        try:
+            with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_metadata(self, metadata: dict) -> None:
+        os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+        with open(METADATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, sort_keys=True)
+
+    def _set_file_metadata(self, filename: str, source: str) -> None:
+        metadata = self._load_metadata()
+        metadata[filename] = self._current_llm_metadata(source)
+        self._save_metadata(metadata)
+
+    def _remove_file_metadata(self, filename: str) -> None:
+        metadata = self._load_metadata()
+        if filename in metadata:
+            metadata.pop(filename, None)
+            self._save_metadata(metadata)
 
     # ---- helpers -----------------------------------------------------------
 
@@ -62,6 +109,96 @@ class KnowledgeBuilder:
     def _safe_filename(addr: str) -> str:
         return re.sub(r"[^\w\-_.]", "_", addr)
 
+    def _sent_folders(self) -> set[str]:
+        folders = {"Sent Items", "Sent"}
+        for acct in self.config.get("accounts", []):
+            imap = acct.get("imap", {})
+            if imap.get("sent_folder"):
+                folders.add(imap["sent_folder"])
+            for folder in imap.get("sync_folders", []):
+                if folder.get("role") == "sent" and folder.get("name"):
+                    folders.add(folder["name"])
+        return folders
+
+    def _recipient_addresses(self, recipients) -> list[str]:
+        if isinstance(recipients, str):
+            try:
+                recipients = json.loads(recipients)
+            except Exception:
+                recipients = []
+        result = []
+        for recipient in recipients or []:
+            if isinstance(recipient, dict):
+                addr = recipient.get("email", "")
+            else:
+                _, addr = self._addr(str(recipient))
+            addr = (addr or "").lower()
+            if addr and "@" in addr:
+                result.append(addr)
+        return result
+
+    def contact_filename(self, addr: str) -> str:
+        return self._safe_filename((addr or "").lower()) + ".md"
+
+    def contact_knowledge_exists(self, addr: str) -> bool:
+        if not addr or "@" not in addr:
+            return False
+        return os.path.exists(os.path.join(KNOWLEDGE_DIR, self.contact_filename(addr)))
+
+    def contact_for_email(self, email_row: dict) -> dict:
+        if not email_row:
+            return {}
+        sent = email_row.get("folder") in self._sent_folders()
+        if sent:
+            recipients = self._recipient_addresses(email_row.get("recipients", []))
+            addr = recipients[0] if recipients else ""
+            name = addr
+        else:
+            addr, name = self._addr(email_row.get("sender", ""))
+        if not addr or "@" not in addr:
+            return {}
+        return {"email": addr.lower(), "name": name or addr}
+
+    def knowledge_matches_for_email(self, email_row: dict) -> list[dict]:
+        candidates = []
+        sender_addr, sender_name = self._addr(email_row.get("sender", ""))
+        if sender_addr and "@" in sender_addr:
+            candidates.append({"email": sender_addr, "name": sender_name or sender_addr})
+        for addr in self._recipient_addresses(email_row.get("recipients", [])):
+            candidates.append({"email": addr, "name": addr})
+
+        seen = set()
+        matches = []
+        for candidate in candidates:
+            addr = candidate["email"].lower()
+            if addr in seen or not self.contact_knowledge_exists(addr):
+                continue
+            seen.add(addr)
+            matches.append({
+                "email": addr,
+                "name": candidate.get("name") or addr,
+                "file": self.contact_filename(addr),
+            })
+        return matches
+
+    @staticmethod
+    def _clean_generated_markdown(content: str) -> str:
+        content = content or ""
+        fence_re = re.compile(r"```(?:markdown|md)\s*\n([\s\S]*?)```", re.IGNORECASE)
+        fences = list(fence_re.finditer(content))
+        if len(fences) > 1:
+            headings = []
+            for match in fences:
+                heading = re.search(r"^\s{0,3}#{1,6}\s+(.+)$", match.group(1), flags=re.MULTILINE)
+                if heading:
+                    headings.append(heading.group(1).strip().lower())
+            if len(headings) == len(fences) and all(h == headings[0] for h in headings):
+                first = fences[0]
+                last = fences[-1]
+                content = content[:first.start()] + first.group(1).strip() + "\n" + content[last.end():]
+                return content.strip()
+        return fence_re.sub(lambda m: m.group(1).strip() + "\n", content).strip()
+
     # ---- knowledge builders ------------------------------------------------
 
     def build_style_knowledge(self, sent_emails: list) -> dict:
@@ -74,33 +211,20 @@ class KnowledgeBuilder:
             for e in sample
         )
 
-        system = (
-            "You are an email communication analyst. Analyse the sent emails below and "
-            "produce a comprehensive writing-style guide in markdown. "
-            "Be specific and detailed — this guide will be used by an AI to ghost-write "
-            "replies that sound exactly like the author."
+        prompts = prompt_defaults.ensure_prompts(self.config)
+        system = prompts["knowledge_style_system"]
+        user = prompt_defaults.render_prompt(
+            prompts["knowledge_style_user"],
+            {"snippets": snippets[:9000]},
         )
-        user = f"""Analyse these sent emails and produce a markdown writing-style guide.
-
-{snippets[:9000]}
-
-Include sections for:
-## Overall Communication Style
-## Typical Greetings and Openings
-## Typical Closings and Sign-offs
-## Tone and Formality Level
-## Sentence Structure and Length
-## Common Phrases and Vocabulary
-## Emoji / Punctuation Habits
-## Language Patterns to Replicate
-"""
         try:
-            content = self._call_llm(system, user, max_tokens=2500)
+            content = self._clean_generated_markdown(self._call_llm(system, user, max_tokens=2500))
             path = os.path.join(KNOWLEDGE_DIR, "_writing_style.md")
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"# Writing Style Guide\n\n")
                 f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M}*\n\n")
                 f.write(content)
+            self._set_file_metadata("_writing_style.md", "writing_style")
             return {"success": True, "file": path}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -122,30 +246,21 @@ Include sections for:
             else "No replies on record."
         )
 
-        system = (
-            "You are an email relationship analyst. Based on the email exchange, "
-            "write a concise, factual markdown contact profile. "
-            "Be practical — this will be used to personalise AI-generated replies."
+        prompts = prompt_defaults.ensure_prompts(self.config)
+        system = prompts["knowledge_contact_system"]
+        user = prompt_defaults.render_prompt(
+            prompts["knowledge_contact_user"],
+            {
+                "addr": addr,
+                "display_name": data.get("name", "Unknown"),
+                "received_count": len(data["emails"]),
+                "replied_count": len(data["my_replies"]),
+                "from_text": from_text[:3500],
+                "reply_text": reply_text[:2000],
+            },
         )
-        user = f"""Create a contact profile for: {addr}
-Display name: {data.get('name','Unknown')}
-Emails received: {len(data['emails'])} | Replies sent: {len(data['my_replies'])}
-
-EMAILS FROM THIS PERSON:
-{from_text[:3500]}
-
-MY REPLIES TO THEM:
-{reply_text[:2000]}
-
-Profile sections:
-## Who This Person Is
-## Main Topics They Write About
-## Their Tone and Communication Style
-## How I Typically Respond to Them
-## Key Context / Patterns to Remember
-"""
         try:
-            content = self._call_llm(system, user, max_tokens=1200)
+            content = self._clean_generated_markdown(self._call_llm(system, user, max_tokens=1200))
             fname = self._safe_filename(addr) + ".md"
             path  = os.path.join(KNOWLEDGE_DIR, fname)
             with open(path, "w", encoding="utf-8") as f:
@@ -154,9 +269,36 @@ Profile sections:
                 f.write(f"**Received:** {len(data['emails'])} | **Replied:** {len(data['my_replies'])}  \n")
                 f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M}*\n\n")
                 f.write(content)
+            self._set_file_metadata(fname, "contact_profile")
             return {"success": True, "contact": addr, "file": path}
         except Exception as exc:
             return {"success": False, "contact": addr, "error": str(exc)}
+
+    def build_contact_for_email(self, email_id: str, progress_callback=None) -> dict:
+        selected = database.get_email_by_id(email_id)
+        contact = self.contact_for_email(selected)
+        if not contact:
+            return {"success": False, "error": "Could not infer a contact for this email"}
+
+        addr = contact["email"]
+        all_emails = database.get_all_emails()
+        sent_folders = self._sent_folders()
+        data = {"name": contact.get("name", addr), "emails": [], "my_replies": []}
+
+        for email_row in all_emails:
+            sender_addr, sender_name = self._addr(email_row.get("sender", ""))
+            if sender_addr == addr:
+                data["emails"].append(email_row)
+                if sender_name and data["name"] == addr:
+                    data["name"] = sender_name
+            if email_row.get("folder") in sent_folders and addr in self._recipient_addresses(email_row.get("recipients", [])):
+                data["my_replies"].append(email_row)
+
+        if progress_callback:
+            progress_callback(f"Building knowledge for {addr} from {len(data['emails'])} received and {len(data['my_replies'])} sent emails...")
+        if not data["emails"] and not data["my_replies"]:
+            return {"success": False, "contact": addr, "error": "No emails found for this contact"}
+        return self.build_contact_knowledge(addr, data)
 
     # ---- main entry point --------------------------------------------------
 
@@ -168,12 +310,7 @@ Profile sections:
 
         all_emails = database.get_all_emails()
 
-        sent_folders = {
-            acct["imap"].get("sent_folder", "Sent Items")
-            for acct in self.config.get("accounts", [])
-        }
-        if not sent_folders:
-            sent_folders = {"Sent Items", "Sent"}
+        sent_folders = self._sent_folders()
 
         new_sent  = [e for e in new_emails if e["folder"] in sent_folders]
         new_inbox = [e for e in new_emails if e["folder"] not in sent_folders]
@@ -342,6 +479,7 @@ Profile sections:
 
     def list_knowledge_files(self) -> list[dict]:
         pinned = set(self.get_pinned())
+        metadata = self._load_metadata()
         result = []
         for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
             if not fname.endswith(".md"):
@@ -350,7 +488,8 @@ Profile sections:
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
             result.append({"name": fname, "path": fpath, "content": content,
-                            "pinned": fname in pinned})
+                            "pinned": fname in pinned,
+                            "metadata": metadata.get(fname, {})})
         return result
 
     def suggested_context(self, sender_email: str, recipient_emails=None) -> list:
@@ -379,13 +518,28 @@ Profile sections:
         with open(fpath, "r", encoding="utf-8") as f:
             return f.read()
 
-    def save_knowledge_file(self, filename: str, content: str) -> dict:
+    def save_knowledge_file(self, filename: str, content: str, source: str = "manual") -> dict:
         if not filename.endswith(".md"):
             filename += ".md"
         filename = self._safe_filename(filename.replace(".md", "")) + ".md"
         fpath = os.path.join(KNOWLEDGE_DIR, filename)
+        existed = os.path.exists(fpath)
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
+        if source != "manual" or not existed:
+            metadata = self._load_metadata()
+            if source == "manual":
+                metadata.setdefault(filename, {
+                    "source": "manual",
+                    "llm_id": "",
+                    "llm_name": "",
+                    "model": "",
+                    "base_url": "",
+                    "generated_at": datetime.now().isoformat(),
+                })
+                self._save_metadata(metadata)
+            else:
+                self._set_file_metadata(filename, source)
         return {"success": True, "name": filename}
 
     def delete_knowledge_file(self, filename: str) -> dict:
@@ -393,4 +547,23 @@ Profile sections:
         if not fpath.endswith(".md") or not os.path.exists(fpath):
             return {"success": False, "error": "File not found"}
         os.remove(fpath)
+        self._remove_file_metadata(os.path.basename(filename))
         return {"success": True}
+
+    def delete_knowledge_by_llm(self, llm_id: str) -> dict:
+        metadata = self._load_metadata()
+        deleted = []
+        for fname, meta in list(metadata.items()):
+            if meta.get("llm_id") != llm_id:
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))
+            if fpath.endswith(".md") and os.path.exists(fpath):
+                os.remove(fpath)
+                deleted.append(fname)
+            metadata.pop(fname, None)
+
+        if deleted:
+            pinned = [p for p in self.get_pinned() if os.path.basename(p) not in deleted]
+            self.set_pinned(pinned)
+        self._save_metadata(metadata)
+        return {"success": True, "deleted": deleted, "count": len(deleted)}

@@ -57,7 +57,7 @@ open http://localhost:5100
 
 Config is stored at `~/email_assistant/config.json` — **outside the repo**, so it survives updates and rebuilds. On first run a default file is created automatically.
 
-Open **Settings (⚙)** in the UI to configure accounts and the AI provider without editing JSON manually.
+Open **Settings (⚙)** in the UI to configure accounts and one or more AI providers without editing JSON manually.
 
 Key fields:
 
@@ -66,9 +66,11 @@ Key fields:
 | `accounts[].imap.server` | Your IMAP hostname |
 | `accounts[].imap.sent_folder` | `"Sent Items"` (Outlook), `"Sent"` (Gmail/Fastmail). Use Settings → Discover Folders to find the exact name. |
 | `accounts[].imap.fetch_limit` | Max emails to fetch per folder (default 300) |
-| `lm_studio.base_url` | Base URL of your LLM backend |
-| `lm_studio.model` | Model identifier. For LM Studio with one model loaded, any string works. |
-| `lm_studio.api_key` | Leave blank for local providers. Required for OpenAI, Anthropic via LiteLLM, etc. |
+| `llms[].base_url` | Base URL of each OpenAI-compatible LLM backend |
+| `llms[].model` | Model identifier. For LM Studio with one model loaded, any string works. |
+| `llms[].api_key` | Leave blank for local providers. Required for OpenAI, Anthropic via LiteLLM, etc. |
+| `default_llm_id` | Provider selected by default |
+| `app.active_llm_id` | Provider currently selected in the UI dropdown |
 
 ### LLM provider presets
 
