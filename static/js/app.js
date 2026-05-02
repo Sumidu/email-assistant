@@ -599,6 +599,7 @@ let kbLlmFilter="all";
 const kbViewMode=document.getElementById("kb-view-mode");
 const kbEditMode=document.getElementById("kb-edit-mode");
 const kbEditFilename=document.getElementById("kb-edit-filename");
+const kbEditPatterns=document.getElementById("kb-edit-patterns");
 const kbEditContent=document.getElementById("kb-edit-content");
 const kbFilelist=document.getElementById("kb-filelist");
 const kbLlmFilterEl=document.getElementById("kb-llm-filter");
@@ -620,9 +621,14 @@ async function reloadKbFiles(preferredFileName=null){
 
 function kbMetaLabel(f){
   const m=f.metadata||{};
+  if((m.match_patterns||[]).length)return `Matches ${m.match_patterns.join(", ")}`;
   if(m.llm_name||m.model)return `${m.llm_name||m.llm_id||"Unknown"}${m.model?" / "+m.model:""}`;
   if(m.source==="manual")return"Manual";
   return"Unknown";
+}
+
+function parseMatchPatterns(value){
+  return String(value||"").split(/[,\n]+/).map(x=>x.trim().toLowerCase()).filter(Boolean);
 }
 
 function renderKbFilters(){
@@ -721,10 +727,12 @@ function enterKbEditMode(file){
   if(file){
     kbEditFilename.value=file.name.replace(/\.md$/,"");
     kbEditFilename.disabled=true; // can't rename, just edit content
+    kbEditPatterns.value=(file.metadata?.match_patterns||[]).join(", ");
     kbEditContent.value=file.content;
     kbEditingFile=file.name;
   }else{
     kbEditFilename.value="";kbEditFilename.disabled=false;
+    kbEditPatterns.value="";
     kbEditContent.value="";kbEditingFile=null;
   }
   kbEditContent.focus();
@@ -759,11 +767,12 @@ document.getElementById("kb-cancel-edit").addEventListener("click",()=>{
 document.getElementById("kb-save-edit").addEventListener("click",async()=>{
   const filename=kbEditingFile||(kbEditFilename.value.trim()||"untitled");
   const content=kbEditContent.value;
+  const match_patterns=parseMatchPatterns(kbEditPatterns.value);
   try{
     if(kbEditingFile){
-      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});
+      await fetch(`/api/knowledge_files/${encodeURIComponent(kbEditingFile)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content,match_patterns})});
     }else{
-      await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content})});
+      await fetch("/api/knowledge_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,content,match_patterns})});
     }
     await reloadKbFiles();
     setStatus("Knowledge file saved","ok");

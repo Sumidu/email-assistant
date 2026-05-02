@@ -5,6 +5,7 @@ files per contact and a global writing-style guide.
 """
 
 import email.utils
+import fnmatch
 import json
 import os
 import re
@@ -89,6 +90,40 @@ class KnowledgeBuilder:
         metadata[filename] = self._current_llm_metadata(source)
         self._save_metadata(metadata)
 
+    @staticmethod
+    def _normalize_match_patterns(patterns) -> list[str]:
+        if isinstance(patterns, str):
+            patterns = re.split(r"[\n,]+", patterns)
+        result = []
+        for pattern in patterns or []:
+            pattern = str(pattern or "").strip().lower()
+            if pattern and pattern not in result:
+                result.append(pattern)
+        return result
+
+    @staticmethod
+    def _pattern_matches_address(pattern: str, addr: str) -> bool:
+        addr = (addr or "").lower()
+        pattern = (pattern or "").lower()
+        if not addr or "@" not in addr or not pattern:
+            return False
+        domain = addr.split("@", 1)[1]
+        if "@" in pattern:
+            return fnmatch.fnmatch(addr, pattern)
+        return fnmatch.fnmatch(domain, pattern.lstrip("@"))
+
+    def _pattern_files_for_address(self, addr: str) -> list[str]:
+        metadata = self._load_metadata()
+        matches = []
+        for fname, meta in metadata.items():
+            if not fname.endswith(".md"):
+                continue
+            patterns = self._normalize_match_patterns(meta.get("match_patterns", []))
+            if any(self._pattern_matches_address(pattern, addr) for pattern in patterns):
+                if os.path.exists(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))):
+                    matches.append(os.path.basename(fname))
+        return matches
+
     def _remove_file_metadata(self, filename: str) -> None:
         metadata = self._load_metadata()
         if filename in metadata:
@@ -171,14 +206,26 @@ class KnowledgeBuilder:
         matches = []
         for candidate in candidates:
             addr = candidate["email"].lower()
-            if addr in seen or not self.contact_knowledge_exists(addr):
+            if addr in seen:
                 continue
-            seen.add(addr)
-            matches.append({
-                "email": addr,
-                "name": candidate.get("name") or addr,
-                "file": self.contact_filename(addr),
-            })
+            if self.contact_knowledge_exists(addr):
+                seen.add(addr)
+                matches.append({
+                    "email": addr,
+                    "name": candidate.get("name") or addr,
+                    "file": self.contact_filename(addr),
+                })
+            for fname in self._pattern_files_for_address(addr):
+                key = f"{addr}:{fname}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append({
+                    "email": addr,
+                    "name": candidate.get("name") or addr,
+                    "file": fname,
+                    "match": "wildcard",
+                })
         return matches
 
     @staticmethod
@@ -426,6 +473,15 @@ class KnowledgeBuilder:
         if os.path.exists(contact_path) and contact_path not in loaded_paths:
             with open(contact_path, "r", encoding="utf-8") as f:
                 knowledge.append(("Contact Profile", f.read()))
+            loaded_paths.add(contact_path)
+
+        for fname in self._pattern_files_for_address(sender_email):
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            if os.path.exists(fpath) and fpath not in loaded_paths:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    label = fname.replace(".md", "").replace("_", " ").title()
+                    knowledge.append((f"Wildcard: {label}", f.read()))
+                loaded_paths.add(fpath)
 
         return knowledge
 
@@ -507,8 +563,12 @@ class KnowledgeBuilder:
             _add(os.path.basename(fname))
         _add("_writing_style.md")
         _add(self._safe_filename(sender_email.lower()) + ".md")
+        for fname in self._pattern_files_for_address(sender_email):
+            _add(fname)
         for addr in (recipient_emails or []):
             _add(self._safe_filename(addr.lower()) + ".md")
+            for fname in self._pattern_files_for_address(addr):
+                _add(fname)
         return suggested
 
     def load_knowledge_file(self, filename: str):
@@ -518,7 +578,7 @@ class KnowledgeBuilder:
         with open(fpath, "r", encoding="utf-8") as f:
             return f.read()
 
-    def save_knowledge_file(self, filename: str, content: str, source: str = "manual") -> dict:
+    def save_knowledge_file(self, filename: str, content: str, source: str = "manual", match_patterns=None) -> dict:
         if not filename.endswith(".md"):
             filename += ".md"
         filename = self._safe_filename(filename.replace(".md", "")) + ".md"
@@ -526,20 +586,29 @@ class KnowledgeBuilder:
         existed = os.path.exists(fpath)
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(content)
-        if source != "manual" or not existed:
-            metadata = self._load_metadata()
-            if source == "manual":
-                metadata.setdefault(filename, {
-                    "source": "manual",
-                    "llm_id": "",
-                    "llm_name": "",
-                    "model": "",
-                    "base_url": "",
-                    "generated_at": datetime.now().isoformat(),
-                })
-                self._save_metadata(metadata)
-            else:
-                self._set_file_metadata(filename, source)
+        metadata = self._load_metadata()
+        if source != "manual":
+            metadata[filename] = self._current_llm_metadata(source)
+        elif not existed:
+            metadata.setdefault(filename, {
+                "source": "manual",
+                "llm_id": "",
+                "llm_name": "",
+                "model": "",
+                "base_url": "",
+                "generated_at": datetime.now().isoformat(),
+            })
+        if match_patterns is not None:
+            metadata.setdefault(filename, {
+                "source": "manual",
+                "llm_id": "",
+                "llm_name": "",
+                "model": "",
+                "base_url": "",
+                "generated_at": datetime.now().isoformat(),
+            })
+            metadata[filename]["match_patterns"] = self._normalize_match_patterns(match_patterns)
+        self._save_metadata(metadata)
         return {"success": True, "name": filename}
 
     def delete_knowledge_file(self, filename: str) -> dict:

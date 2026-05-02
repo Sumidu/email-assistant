@@ -56,6 +56,7 @@ def create_knowledge_file():
         data["filename"],
         data.get("content", ""),
         source=data.get("source", "manual"),
+        match_patterns=data.get("match_patterns"),
     )
     return jsonify(result)
 
@@ -65,7 +66,12 @@ def update_knowledge_file(filename):
     data = request.json
     if not data or "content" not in data:
         return jsonify({"error": "Missing content"}), 400
-    result = rt.kb.save_knowledge_file(filename, data["content"], source=data.get("source", "manual"))
+    result = rt.kb.save_knowledge_file(
+        filename,
+        data["content"],
+        source=data.get("source", "manual"),
+        match_patterns=data.get("match_patterns"),
+    )
     return jsonify(result)
 
 
