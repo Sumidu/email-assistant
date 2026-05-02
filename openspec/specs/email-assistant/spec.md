@@ -346,7 +346,7 @@ The application SHALL match knowledge base entries to emails using exact address
 
 #### Scenario: Wildcard domain match
 
-- **WHEN** a knowledge entry contains a wildcard such as `*.student.uni-luebeck.de`
+- **WHEN** a knowledge entry contains a wildcard such as `*.team.example.com`
 - **AND** an email address matches that wildcard
 - **THEN** the application SHALL associate that email with the wildcard knowledge entry.
 
@@ -517,4 +517,3 @@ The current system SHALL NOT provide the following behavior unless a future spec
 - Multi-user cloud synchronization.
 - A hosted web service mode for remote users.
 - Guaranteed real-time push email delivery.
-
