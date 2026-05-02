@@ -10,7 +10,6 @@ def run_background(fn, *args) -> None:
         task_status["progress"] = []
 
         def progress(msg):
-            print(f"[BG] {msg}")
             task_status["message"] = msg
             task_status["progress"].append(msg)
 

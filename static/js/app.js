@@ -69,6 +69,46 @@ function setStatus(msg,state="idle"){
   statusDot.className="sb-dot"+(state==="busy"?" amber":state==="ok"?" green":state==="err"?" red":"");
 }
 
+// ─── Floating tooltip ─────────────────────────────────────────────────────
+const floatingTooltip=document.createElement("div");
+floatingTooltip.id="floating-tooltip";
+document.body.appendChild(floatingTooltip);
+
+function positionFloatingTooltip(anchor){
+  const tip=floatingTooltip;
+  const r=anchor.getBoundingClientRect();
+  const margin=10;
+  const maxLeft=window.innerWidth-tip.offsetWidth-margin;
+  let left=Math.min(Math.max(margin,r.left+r.width/2-tip.offsetWidth*.35),maxLeft);
+  let top=r.bottom+8;
+  if(top+tip.offsetHeight+margin>window.innerHeight)top=r.top-tip.offsetHeight-8;
+  tip.style.left=`${Math.max(margin,left)}px`;
+  tip.style.top=`${Math.max(margin,top)}px`;
+}
+
+function showFloatingTooltip(anchor){
+  const text=anchor.dataset.tip||anchor.getAttribute("title")||"";
+  if(!text)return;
+  floatingTooltip.textContent=text;
+  floatingTooltip.classList.add("open");
+  positionFloatingTooltip(anchor);
+}
+
+function hideFloatingTooltip(){
+  floatingTooltip.classList.remove("open");
+}
+
+document.addEventListener("mouseover",e=>{
+  const anchor=e.target.closest?.(".acct-info-btn[data-tip]");
+  if(anchor)showFloatingTooltip(anchor);
+});
+document.addEventListener("mouseout",e=>{
+  const anchor=e.target.closest?.(".acct-info-btn[data-tip]");
+  if(anchor&&!anchor.contains(e.relatedTarget))hideFloatingTooltip();
+});
+document.addEventListener("scroll",hideFloatingTooltip,true);
+window.addEventListener("resize",hideFloatingTooltip);
+
 // ─── Progress drawer ──────────────────────────────────────────────────────
 const progressDrawer=document.getElementById("progress-drawer");
 const progressLog=document.getElementById("progress-log");
@@ -1142,7 +1182,7 @@ function renderAccountsList(accounts){
   if(!accounts.length){c.innerHTML='<div style="color:var(--dim);font-size:11px;padding:8px 0;">No accounts configured yet.</div>';return;}
   c.innerHTML=accounts.map(a=>`
     <div class="acct-list-item">
-      <div class="acct-list-info"><div class="acct-list-name">${escHtml(a.name)} <span class="acct-info-btn" data-account-info="${escHtml(a.id)}" data-tip="Loading account info...">i</span></div><div class="acct-list-user">${escHtml(a.imap?.username||"")}</div></div>
+      <div class="acct-list-info"><div class="acct-list-name">${escHtml(a.name)} ${providerBadge(a.imap?.detected_provider)} <span class="acct-info-btn" data-account-info="${escHtml(a.id)}" data-tip="Loading account info...">i</span></div><div class="acct-list-user">${escHtml(a.imap?.username||"")}</div></div>
       <div class="acct-list-actions">
         <button class="icon-btn" data-edit-id="${escHtml(a.id)}">Edit</button>
         <button class="icon-btn del" data-del-id="${escHtml(a.id)}" data-del-name="${escHtml(a.name)}">&#10005;</button>
@@ -1162,6 +1202,45 @@ function formatBytes(n){
   return `${v>=10?v.toFixed(1):v.toFixed(2)} ${units[i]}`;
 }
 
+function providerFromOverride(value){
+  if(value==="outlook")return {id:"outlook",name:"Outlook / Microsoft 365",confidence:"manual"};
+  if(value==="google")return {id:"google",name:"Google / Gmail",confidence:"manual"};
+  if(value==="generic")return {id:"generic",name:"Generic IMAP",confidence:"manual"};
+  return null;
+}
+
+function detectProviderFromFields(server,username,override){
+  const manual=providerFromOverride(override);
+  if(manual)return manual;
+  const s=String(server||"").trim().toLowerCase();
+  const u=String(username||"").trim().toLowerCase();
+  const domain=u.includes("@")?u.split("@").pop():"";
+  const hay=[s,domain].join(" ");
+  const outlook=["outlook.office365.com","imap-mail.outlook.com","imap.outlook.com","office365.com","outlook.com","hotmail.com","live.com","msn.com"];
+  if(outlook.some(x=>hay.includes(x)))return {id:"outlook",name:"Outlook / Microsoft 365",confidence:s.includes("outlook.office365.com")||domain.includes("outlook.com")?"high":"medium"};
+  if(hay.includes("gmail.com")||hay.includes("googlemail.com"))return {id:"google",name:"Google / Gmail",confidence:"high"};
+  if(hay.includes("icloud.com")||domain==="me.com"||domain==="mac.com")return {id:"icloud",name:"Apple iCloud",confidence:"high"};
+  return {id:"generic",name:"Generic IMAP",confidence:"low"};
+}
+
+function providerBadge(provider){
+  const p=provider||{};
+  if(!p.id||p.id==="generic")return "";
+  return `<span class="provider-badge provider-${escHtml(p.id)}" title="${escHtml(p.reason||p.name||"Detected provider")}">${escHtml(p.name||p.id)}</span>`;
+}
+
+function updateProviderHint(){
+  const hint=document.getElementById("cfg-provider-hint");
+  if(!hint)return;
+  const p=detectProviderFromFields(
+    document.getElementById("cfg-imap-server")?.value,
+    document.getElementById("cfg-imap-username")?.value,
+    document.getElementById("cfg-provider-override")?.value
+  );
+  hint.textContent=`Provider: ${p.name}${p.confidence&&p.confidence!=="low"?` (${p.confidence})`:""}`;
+  hint.className="field-hint provider-hint "+(p.id==="outlook"?"is-outlook":p.id==="generic"?"":"is-known");
+}
+
 async function loadAccountInfoTip(el){
   try{
     const id=el.dataset.accountInfo;
@@ -1174,6 +1253,8 @@ async function loadAccountInfoTip(el){
       `${data.email_count||0} local emails`,
       `Approx. account data: ${formatBytes(data.approx_account_bytes)}`,
       `Database file: ${formatBytes(data.database_file_bytes)}`,
+      acct?.imap?.detected_provider?.name?`Detected provider: ${acct.imap.detected_provider.name} (${acct.imap.detected_provider.confidence||"unknown"} confidence)`:"",
+      acct?.imap?.provider_override&&acct.imap.provider_override!=="auto"?`Provider override: ${acct.imap.provider_override}`:"Provider override: auto",
       acct?.imap?.sync_mode?`Mode: ${acct.imap.sync_mode}`:"",
       acct?.imap?.auto_sync?`Auto-sync: every ${acct.imap.sync_interval_minutes||5} min`:"Auto-sync: off",
       folders?`\nFolders:\n${folders}`:"",
@@ -1191,12 +1272,14 @@ function _populateAccountForm(acct){
   document.getElementById("cfg-imap-port").value=acct?.imap?.port||993;
   document.getElementById("cfg-imap-username").value=acct?.imap?.username||"";
   document.getElementById("cfg-imap-password").value=acct?.imap?.password||"";
+  document.getElementById("cfg-provider-override").value=acct?.imap?.provider_override||"auto";
   document.getElementById("cfg-imap-limit").value=acct?.imap?.fetch_limit||300;
   document.getElementById("cfg-sync-mode").value=acct?.imap?.sync_mode||"recent";
   document.getElementById("cfg-sync-since").value=acct?.imap?.sync_since||"";
   document.getElementById("cfg-body-storage").value=acct?.imap?.body_storage||"text_html";
   document.getElementById("cfg-auto-sync").checked=!!acct?.imap?.auto_sync;
   document.getElementById("cfg-sync-interval").value=acct?.imap?.sync_interval_minutes||5;
+  updateProviderHint();
   // Render saved sync_folders if any
   const saved=acct?.imap?.sync_folders||[];
   if(saved.length){discoveredFolders=saved;renderFolderPicker(saved,true);}
@@ -1285,6 +1368,11 @@ document.getElementById("btn-discover-folders").addEventListener("click",async()
   }catch(err){status.textContent="Connection failed: "+err.message;status.style.color="var(--red)";}
 });
 
+["cfg-imap-server","cfg-imap-username","cfg-provider-override"].forEach(id=>{
+  document.getElementById(id)?.addEventListener("input",updateProviderHint);
+  document.getElementById(id)?.addEventListener("change",updateProviderHint);
+});
+
 // ─── Save settings ────────────────────────────────────────────────────────
 async function saveSettings(){
   const activeTab=settingsActiveTab;
@@ -1298,6 +1386,7 @@ async function saveSettings(){
         port:parseInt(document.getElementById("cfg-imap-port").value)||993,
         username:document.getElementById("cfg-imap-username").value.trim(),
         password:document.getElementById("cfg-imap-password").value,
+        provider_override:document.getElementById("cfg-provider-override").value||"auto",
         fetch_limit:parseInt(document.getElementById("cfg-imap-limit").value)||300,
         sync_mode:document.getElementById("cfg-sync-mode").value,
         sync_since:document.getElementById("cfg-sync-since").value,
@@ -1390,6 +1479,7 @@ document.getElementById("btn-settings").addEventListener("click",()=>{loadSettin
 
 // ─── Debug log modal ──────────────────────────────────────────────────────
 let debugEntries=[];
+let debugSummary=null;
 let debugReadIds=new Set(JSON.parse(localStorage.getItem("mail-log-read-ids")||"[]"));
 
 function saveDebugReadIds(){
@@ -1403,13 +1493,28 @@ function logEntryId(entry){
 }
 
 function parseLogEntry(entry){
+  if(typeof entry==="object"&&entry){
+    const ts=entry.timestamp||"";
+    const date=ts?new Date(ts.replace(" ","T")):null;
+    return {
+      header:entry.header||"",
+      ts,
+      kind:entry.kind||"log",
+      model:entry.model||"",
+      date,
+      inputTokens:Number(entry.input_tokens)||0,
+      outputTokens:Number(entry.output_tokens)||0,
+      totalTokens:Number(entry.total_tokens)||0,
+      text:entry.text||"",
+    };
+  }
   const header=(entry.split("\n")[0]||"").trim();
   const match=header.match(/^\[(.*?)\]\s+kind=([^\s]+)\s+model=(.*)$/);
   const ts=match?.[1]||"";
   const kind=match?.[2]||"log";
   const model=(match?.[3]||"").trim();
   const date=ts?new Date(ts.replace(" ","T")):null;
-  return {header,ts,kind,model,date};
+  return {header,ts,kind,model,date,inputTokens:0,outputTokens:0,totalTokens:0,text:entry};
 }
 
 function formatLogTime(date){
@@ -1431,23 +1536,51 @@ function formatLogTime(date){
   return date.toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 }
 
+function formatTokenCount(n){
+  n=Number(n)||0;
+  if(n>=1000000)return `${(n/1000000).toFixed(2)}M`;
+  if(n>=1000)return `${(n/1000).toFixed(n>=10000?0:1)}k`;
+  return String(n);
+}
+
+function renderLogSummary(){
+  const el=document.getElementById("log-token-summary");
+  if(!el)return;
+  const s=debugSummary||{};
+  const cards=[
+    ["Last 24 hours",s.last_24h],
+    ["Last 7 days",s.last_7d],
+  ];
+  el.className="log-summary";
+  el.innerHTML=cards.map(([label,row])=>{
+    row=row||{entries:0,input_tokens:0,output_tokens:0,total_tokens:0};
+    return `<div class="log-summary-card"><strong>${escHtml(label)}</strong><span>${row.entries||0} calls · ${formatTokenCount(row.total_tokens)} total tokens</span><span>In ${formatTokenCount(row.input_tokens)} · Out ${formatTokenCount(row.output_tokens)}</span></div>`;
+  }).join("");
+}
+
 function renderDebugEntries(){
   const list=document.getElementById("debug-entry-list");
   const detail=document.getElementById("debug-entry-detail");
   list.innerHTML="";
+  renderLogSummary();
   if(!debugEntries.length){detail.textContent="No log entries yet.";return;}
   function selectItem(item,entry,id,markRead){
+    const meta=parseLogEntry(entry);
     list.querySelectorAll(".log-entry-item").forEach(d=>d.classList.remove("active"));
     item.classList.add("active");
     if(markRead){
       item.classList.remove("unread");
       debugReadIds.add(id);saveDebugReadIds();
     }
-    detail.textContent=entry;
+    detail.textContent=[
+      `Estimated tokens: input ${meta.inputTokens} · output ${meta.outputTokens} · total ${meta.totalTokens}`,
+      "",
+      meta.text||String(entry||""),
+    ].join("\n");
   }
   debugEntries.forEach((entry,i)=>{
     const meta=parseLogEntry(entry);
-    const id=logEntryId(entry);
+    const id=logEntryId(meta.text||JSON.stringify(entry));
     const unread=!debugReadIds.has(id);
     const title=[meta.kind,meta.model].filter(Boolean).join(" · ")||meta.header||`Entry ${i+1}`;
     const item=document.createElement("div");
@@ -1457,24 +1590,32 @@ function renderDebugEntries(){
       <span class="log-entry-main">
         <span class="log-entry-time">${escHtml(formatLogTime(meta.date))}</span>
         <span class="log-entry-title">${escHtml(title)}</span>
+        <span class="log-entry-tokens">In ${escHtml(formatTokenCount(meta.inputTokens))} · Out ${escHtml(formatTokenCount(meta.outputTokens))}</span>
       </span>
-      <span class="log-entry-tooltip">${escHtml(meta.header||title)}</span>`;
+      <span class="log-entry-tooltip">${escHtml((meta.header||title)+`\nInput tokens: ${meta.inputTokens}\nOutput tokens: ${meta.outputTokens}\nTotal tokens: ${meta.totalTokens}`)}</span>`;
     item.addEventListener("click",()=>selectItem(item,entry,id,true));
     list.appendChild(item);
   });
-  if(list.firstChild)selectItem(list.firstChild,debugEntries[0],logEntryId(debugEntries[0]),false);
+  if(list.firstChild){
+    const firstMeta=parseLogEntry(debugEntries[0]);
+    selectItem(list.firstChild,debugEntries[0],logEntryId(firstMeta.text||JSON.stringify(debugEntries[0])),false);
+  }
 }
 
 async function loadDebugLog(){
   try{
     const data=await fetch("/api/llm_log").then(r=>r.json());
     debugEntries=data.entries||[];
+    debugSummary=data.summary||null;
     renderDebugEntries();
   }catch(e){document.getElementById("debug-entry-detail").textContent="Error loading log: "+e.message;}
 }
 document.getElementById("btn-debug-refresh").addEventListener("click",loadDebugLog);
 document.getElementById("btn-debug-mark-read").addEventListener("click",()=>{
-  debugEntries.forEach(entry=>debugReadIds.add(logEntryId(entry)));
+  debugEntries.forEach(entry=>{
+    const meta=parseLogEntry(entry);
+    debugReadIds.add(logEntryId(meta.text||JSON.stringify(entry)));
+  });
   saveDebugReadIds();
   renderDebugEntries();
 });

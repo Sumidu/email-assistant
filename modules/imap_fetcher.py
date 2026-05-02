@@ -138,10 +138,10 @@ class IMAPFetcher:
         try:
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
             if status != "OK":
-                print(f"[IMAP:{self.account_id}] Could not select folder: {folder_name!r}")
+                print(f"[IMAP] Could not select folder: {folder_name!r}")
                 return 0
         except Exception as exc:
-            print(f"[IMAP:{self.account_id}] select error for {folder_name!r}: {exc}")
+            print(f"[IMAP] select error for {folder_name!r}: {exc}")
             return 0
 
         uidvalidity = self._uidvalidity(conn)
@@ -214,7 +214,7 @@ class IMAPFetcher:
                 count += 1
 
             except Exception as exc:
-                print(f"[IMAP:{self.account_id}] Error on uid {uid}: {exc}")
+                print(f"[IMAP] Error on uid {uid}: {exc}")
                 continue
 
         if uids:

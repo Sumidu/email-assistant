@@ -29,6 +29,53 @@ DEFAULT_CONFIG = {
 }
 
 
+def detect_imap_provider(imap: dict) -> dict:
+    """Return a conservative provider guess from IMAP host and login identity."""
+    override = str(imap.get("provider_override") or "auto").strip().lower()
+    manual = {
+        "outlook": ("Outlook / Microsoft 365", "Use Microsoft Graph for future calendar integration."),
+        "google": ("Google / Gmail", "Use Google Calendar for future calendar integration."),
+        "generic": ("Generic IMAP", "No calendar provider selected."),
+    }
+    if override in manual:
+        name, reason = manual[override]
+        return {"id": override, "name": name, "confidence": "manual", "reason": reason}
+
+    server = str(imap.get("server") or "").strip().lower()
+    username = str(imap.get("username") or "").strip().lower()
+    domain = username.split("@", 1)[1] if "@" in username else ""
+    haystack = " ".join([server, domain])
+
+    outlook_hosts = (
+        "outlook.office365.com",
+        "imap-mail.outlook.com",
+        "imap.outlook.com",
+        "office365.com",
+        "outlook.com",
+        "hotmail.com",
+        "live.com",
+        "msn.com",
+    )
+    if any(token in haystack for token in outlook_hosts):
+        confidence = "high" if "outlook.office365.com" in server or "outlook.com" in domain else "medium"
+        reason = "IMAP host or login domain matches Microsoft Outlook / Microsoft 365."
+        return {"id": "outlook", "name": "Outlook / Microsoft 365", "confidence": confidence, "reason": reason}
+
+    if "gmail.com" in haystack or "googlemail.com" in haystack:
+        return {"id": "google", "name": "Google / Gmail", "confidence": "high", "reason": "IMAP host or login domain matches Google Mail."}
+
+    if "icloud.com" in haystack or "me.com" in domain or "mac.com" in domain:
+        return {"id": "icloud", "name": "Apple iCloud", "confidence": "high", "reason": "IMAP host or login domain matches Apple iCloud Mail."}
+
+    return {"id": "generic", "name": "Generic IMAP", "confidence": "low", "reason": "No known provider pattern matched."}
+
+
+def apply_account_detection(account: dict) -> dict:
+    imap = account.setdefault("imap", {})
+    imap["detected_provider"] = detect_imap_provider(imap)
+    return account
+
+
 def migrate_config_location(base_dir: str) -> None:
     """Move config.json from old location beside the binary to ~/email_assistant/."""
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -75,12 +122,14 @@ def migrate_config(config: dict) -> dict:
         config["accounts"] = []
     for account in config.get("accounts", []):
         imap = account.setdefault("imap", {})
+        imap.setdefault("provider_override", "auto")
         imap.setdefault("fetch_limit", 300)
         imap.setdefault("sync_mode", "recent")
         imap.setdefault("sync_since", "")
         imap.setdefault("auto_sync", False)
         imap.setdefault("sync_interval_minutes", 5)
         imap.setdefault("body_storage", "text_html")
+        apply_account_detection(account)
     llm_providers.ensure_llm_config(config)
     prompt_defaults.ensure_prompts(config)
     quick_templates.ensure_quick_templates(config)

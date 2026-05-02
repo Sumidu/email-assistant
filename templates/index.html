@@ -207,6 +207,17 @@
         <div class="field-group">
           <label>Username / Email</label>
           <input id="cfg-imap-username" type="text" placeholder="you@domain.com" autocomplete="off"/>
+          <div class="field-hint" id="cfg-provider-hint">Provider: Generic IMAP</div>
+        </div>
+        <div class="field-group">
+          <label>Account Type / Calendar Provider</label>
+          <select id="cfg-provider-override" autocomplete="off">
+            <option value="auto">Auto-detect</option>
+            <option value="outlook">Outlook / Microsoft 365</option>
+            <option value="google">Gmail / Google Calendar</option>
+            <option value="generic">Generic IMAP / no calendar</option>
+          </select>
+          <div class="field-hint">This prepares the account for calendar support later. It does not connect to the calendar yet.</div>
         </div>
         <div class="field-group">
           <label>Password / App Password</label>
@@ -352,6 +363,7 @@
           <button class="sbtn" id="btn-debug-refresh" type="button">Refresh Logs</button>
         </div>
         <div class="field-hint log-hint">Opening this tab loads the latest LLM request log. Refresh reloads the file while you keep this view open.</div>
+        <div id="log-token-summary"></div>
         <div id="settings-log-view">
           <div id="debug-entry-list"></div>
           <div id="debug-entry-detail">No log selected.</div>

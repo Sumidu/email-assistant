@@ -23,11 +23,18 @@ KEYCHAIN_VERSION = 1   # bump this when adding new secret fields
 def _set(key: str, value: str):
     keyring.set_password(SERVICE, key, value or "")
 
+def _describe_key(key: str) -> str:
+    if key.startswith("account."):
+        return "IMAP password"
+    if key.startswith("llm.") or key == "lm_studio.api_key":
+        return "LLM API key"
+    return "secret"
+
 def _get(key: str) -> str:
     try:
         return keyring.get_password(SERVICE, key) or ""
     except KeyringError as exc:
-        print(f"[Keychain] Could not read {key}: {exc}")
+        print(f"[Keychain] Could not read {_describe_key(key)}: {exc}")
         return ""
 
 def _delete(key: str):

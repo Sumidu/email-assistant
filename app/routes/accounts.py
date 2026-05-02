@@ -41,6 +41,7 @@ def create_account():
             "password": "",
             "inbox_folder": "INBOX",
             "sent_folder": "Sent Items",
+            "provider_override": "auto",
             "fetch_limit": 300,
             "sync_mode": "recent",
             "sync_since": "",
@@ -53,8 +54,10 @@ def create_account():
     keychain_store.set_imap_password(new_id, password)
 
     account = {"id": new_id, "name": data["name"], "imap": imap_data}
+    config_store.apply_account_detection(account)
     account["imap"]["password"] = password
     rt.config.setdefault("accounts", []).append(account)
+    config_store.apply_account_detection(acct)
     rt.save_config()
     rt.fetchers[new_id] = IMAPFetcher(account)
 
