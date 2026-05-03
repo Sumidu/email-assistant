@@ -12,6 +12,7 @@ def create_app(base_dir: str) -> Flask:
     from app.routes.folders import bp as folders_bp
     from app.routes.knowledge import bp as knowledge_bp
     from app.routes.logs import bp as logs_bp
+    from app.routes.system import bp as system_bp
     from app.routes.tasks import bp as tasks_bp
 
     app = Flask(
@@ -34,6 +35,7 @@ def create_app(base_dir: str) -> Flask:
         calendar_bp,
         chat_bp,
         logs_bp,
+        system_bp,
     ):
         app.register_blueprint(bp)
 

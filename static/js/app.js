@@ -332,6 +332,7 @@ async function openEmail(id,el){
       emailBody.className="html-view";
       const shadow=emailBody.attachShadow?null:null; // no shadow DOM, just iframe-less render
       emailBody.innerHTML=sanitizeEmailHtml(html);
+      prepareExternalEmailLinks(emailBody);
     }else{
       emailBody.className="plain";emailBody.textContent=text||"[No body]";
     }
@@ -423,6 +424,42 @@ function sanitizeEmailHtml(raw){
     .replace(/<img[^>]+src=['"]https?:\/\/[^'"]*track[^'"]*['"][^>]*>/gi,"")
     .replace(/javascript:/gi,"");
   return h;
+}
+
+function prepareExternalEmailLinks(container){
+  container.querySelectorAll("a[href]").forEach(link=>{
+    const rawHref=(link.getAttribute("href")||"").trim();
+    if(!rawHref)return;
+    let url;
+    try{
+      url=new URL(rawHref,window.location.href);
+    }catch(_err){
+      link.removeAttribute("href");
+      return;
+    }
+    if(!["http:","https:"].includes(url.protocol)){
+      link.removeAttribute("href");
+      return;
+    }
+    link.href=url.href;
+    link.target="";
+    link.rel="noopener noreferrer";
+    link.title=link.title||"Open in default browser";
+    link.addEventListener("click",async e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      try{
+        const res=await fetch("/api/open_external",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({url:url.href}),
+        }).then(r=>r.json());
+        if(!res.success)setStatus("Could not open link: "+(res.error||"?"),"err");
+      }catch(err){
+        setStatus("Could not open link: "+err.message,"err");
+      }
+    });
+  });
 }
 
 function renderMarkdownText(markdown){
@@ -1842,11 +1879,6 @@ document.getElementById("btn-acct-back").addEventListener("click",()=>{switchTab
 document.getElementById("btn-propose").addEventListener("click",proposeResponse);
 document.getElementById("btn-copy").addEventListener("click",copyResponse);
 document.getElementById("btn-copy-done").addEventListener("click",copyResponseAndDone);
-document.getElementById("btn-clear-resp").addEventListener("click",()=>{
-  responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
-  currentResponse="";activeCtxFiles=new Set();renderCtxTags();
-  chatHistory=[];renderChatMessages();
-});
 document.getElementById("btn-chat-send").addEventListener("click",()=>sendChat(chatInput.value));
 chatInput.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendChat(chatInput.value);}
