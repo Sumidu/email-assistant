@@ -71,6 +71,14 @@ function setStatus(msg,state="idle"){
   statusDot.className="sb-dot"+(state==="busy"?" amber":state==="ok"?" green":state==="err"?" red":"");
 }
 
+async function refreshFinishedToday(){
+  try{
+    const data=await fetch("/api/stats/today").then(r=>r.json());
+    const n=data.finished_today||0;
+    document.getElementById("finished-today-count").textContent=`${n} finished today`;
+  }catch{}
+}
+
 // ─── Floating tooltip ─────────────────────────────────────────────────────
 const floatingTooltip=document.createElement("div");
 floatingTooltip.id="floating-tooltip";
@@ -307,6 +315,7 @@ const emailSubject=document.getElementById("email-subject"),emailMeta=document.g
 const emailBody=document.getElementById("email-body"),responseText=document.getElementById("response-text");
 const markDoneBtn=document.getElementById("btn-mark-done");
 const generateContactKbBtn=document.getElementById("btn-generate-contact-kb");
+const emailFindTodosBtn=document.getElementById("btn-email-find-todos");
 
 async function openEmail(id,el){
   document.querySelectorAll(".email-item").forEach(x=>x.classList.remove("selected"));
@@ -314,6 +323,7 @@ async function openEmail(id,el){
   emailBody.textContent="Loading…";emailBody.className="";
   markDoneBtn.style.display="none";
   generateContactKbBtn.style.display="none";
+  emailFindTodosBtn.style.display="none";
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
   currentResponse="";activeCtxFiles=new Set();renderCtxTags();
   chatHistory=[];renderChatMessages();
@@ -323,6 +333,7 @@ async function openEmail(id,el){
     currentEmail=data;
     markDoneBtn.style.display=data.folder==="Finished"||data.done_at?"none":"";
     generateContactKbBtn.style.display="";
+    emailFindTodosBtn.style.display="";
     loadSuggestedContext(data);
     emailSubject.textContent=data.subject||"(no subject)";emailSubject.style.color="";
     emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
@@ -342,6 +353,7 @@ async function openEmail(id,el){
 function clearCurrentEmailView(){
   currentEmail=null;currentResponse="";
   markDoneBtn.style.display="none";
+  emailFindTodosBtn.style.display="none";
   emailSubject.textContent="No message selected";emailSubject.style.color="var(--dim)";
   emailMeta.innerHTML="";
   emailBody.textContent="Select a message";emailBody.className="placeholder";
@@ -374,6 +386,7 @@ async function markEmailDone(emailId=currentEmail?.id,{fromList=false}={}){
     const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"POST"}).then(r=>r.json());
     if(!res.success){setStatus("Done failed: "+(res.error||"?"),"err");return;}
     setStatus("Moved to local Finished folder","ok");
+    refreshFinishedToday();
     await refreshAfterEmailMove(emailId,nextId);
   }catch(err){setStatus("Done failed: "+err.message,"err");}
 }
@@ -384,6 +397,7 @@ async function unarchiveEmail(emailId=currentEmail?.id,{fromList=false}={}){
     const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"DELETE"}).then(r=>r.json());
     if(!res.success){setStatus("Unarchive failed: "+(res.error||"?"),"err");return;}
     setStatus("Restored to "+(res.folder||"original folder"),"ok");
+    refreshFinishedToday();
     if(currentEmail?.id===emailId)clearCurrentEmailView();
     await refreshAfterEmailMove(emailId);
   }catch(err){setStatus("Unarchive failed: "+err.message,"err");}
@@ -650,9 +664,30 @@ async function sendChat(userText){
 }
 
 const copyToast=document.getElementById("copy-toast");
+async function copyTextRobust(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    return true;
+  }catch{}
+  const ta=document.createElement("textarea");
+  ta.value=text;
+  ta.setAttribute("readonly","");
+  ta.style.position="fixed";
+  ta.style.left="-9999px";
+  ta.style.top="0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let ok=false;
+  try{ok=document.execCommand("copy");}catch{ok=false;}
+  ta.remove();
+  return ok;
+}
+
 function copyResponse(){
   if(!currentResponse||responseText.classList.contains("placeholder"))return Promise.resolve(false);
-  return navigator.clipboard.writeText(currentResponse).then(()=>{
+  return copyTextRobust(currentResponse).then(ok=>{
+    if(!ok)throw new Error("Clipboard permission denied");
     copyToast.classList.add("show");setTimeout(()=>copyToast.classList.remove("show"),1800);
     return true;
   });
@@ -1521,32 +1556,55 @@ document.getElementById("btn-view-kb").addEventListener("click",openKnowledge);
 document.getElementById("btn-calendar").addEventListener("click",openCalendar);
 document.getElementById("btn-find-todos").addEventListener("click",openTodosModal);
 document.getElementById("btn-settings").addEventListener("click",()=>{loadSettings();openModal("settings-modal");settingsFooterMode("list");switchTab("tab-accounts");});
+emailFindTodosBtn.addEventListener("click",ev=>{
+  ev.stopPropagation();
+  if(!currentEmail?.id){setStatus("Select an email first","err");return;}
+  openTodosModal({emailId:currentEmail.id,forceOpen:true,autoStart:true});
+});
 
 // ─── Todo finder ──────────────────────────────────────────────────────────
-let todoPendingPayload=null;
+let todoPendingPayload=null,todoPreviewTimer=null,todoJobTimer=null,todoLatestCount=0,todoSingleEmailId="";
 
-function openTodosModal(){
+function openTodosModal(options={}){
+  todoSingleEmailId=options.emailId||"";
   const today=new Date();
-  const monthBack=new Date(today);
-  monthBack.setMonth(monthBack.getMonth()-1);
-  document.getElementById("todo-search").value=searchInput.value.trim();
-  document.getElementById("todo-start-date").value=formatDateInput(monthBack);
-  document.getElementById("todo-end-date").value=formatDateInput(today);
-  document.getElementById("todos-results").innerHTML='<div class="todo-empty">Choose filters, then filter.</div>';
-  document.getElementById("btn-filter-todos").disabled=false;
+  const weekBack=new Date(today);
+  weekBack.setDate(weekBack.getDate()-7);
+  const searchEl=document.getElementById("todo-search");
+  const startEl=document.getElementById("todo-start-date");
+  const endEl=document.getElementById("todo-end-date");
+  searchEl.value=todoSingleEmailId?"":searchInput.value.trim();
+  startEl.value=todoSingleEmailId?"":formatDateInput(weekBack);
+  endEl.value=todoSingleEmailId?"":formatDateInput(today);
+  searchEl.disabled=!!todoSingleEmailId;
+  startEl.disabled=!!todoSingleEmailId;
+  endEl.disabled=!!todoSingleEmailId;
+  document.getElementById("todos-results").innerHTML=todoSingleEmailId
+    ?'<div class="todo-empty">This run is scoped to the selected email.</div>'
+    :'<div class="todo-empty">Matching emails are counted automatically.</div>';
+  document.getElementById("todo-live-count").textContent="Counting…";
+  updateTodoProgress({current:0,total:0,current_email:null,status:"idle"});
   document.getElementById("btn-start-todo-llm").hidden=true;
   document.getElementById("btn-start-todo-llm").disabled=false;
+  document.getElementById("btn-export-todos").hidden=true;
+  document.getElementById("btn-create-ews-todos").hidden=true;
   todoPendingPayload=null;
   const popover=document.getElementById("todo-popover");
-  const shouldOpen=!popover.open;
+  const shouldOpen=options.forceOpen||!popover.open;
   if(shouldOpen){
-    const rect=document.getElementById("btn-find-todos").getBoundingClientRect();
-    popover.style.top=(rect.bottom+6)+"px";
-    popover.style.right=Math.max(10,window.innerWidth-rect.right)+"px";
-    if(popover.showModal)popover.showModal();
-    else if(popover.show)popover.show();
-    else popover.setAttribute("open","");
+    if(!popover.open){
+      if(popover.showModal)popover.showModal();
+      else if(popover.show)popover.show();
+      else popover.setAttribute("open","");
+    }
+    refreshTodoPreview().then(()=>{
+      if(options.autoStart)startTodoLlm({skipConfirm:true});
+    });
   }else{
+    todoSingleEmailId="";
+    searchEl.disabled=false;
+    startEl.disabled=false;
+    endEl.disabled=false;
     if(popover.close)popover.close();
     else popover.removeAttribute("open");
   }
@@ -1562,24 +1620,76 @@ function formatDateInput(date){
 function renderTodoResults(data){
   const box=document.getElementById("todos-results");
   const todos=data.todos||[];
+  document.getElementById("btn-export-todos").hidden=!todos.length;
+  document.getElementById("btn-create-ews-todos").hidden=!todos.length;
   if(!todos.length){
     box.innerHTML=`<div class="todo-empty">No actionable todos found in ${data.analyzed||0} analyzed emails.</div>`;
     return;
   }
   box.innerHTML=`
-    <div class="todo-summary">${todos.length} candidates from ${data.analyzed||0} analyzed emails${data.matched>data.analyzed?` (${data.matched} matched locally)`: ""}</div>
+    <div class="todo-summary">${todos.length} editable candidates from ${data.analyzed||0} analyzed emails${data.matched>data.analyzed?` (${data.matched} matched locally)`: ""}</div>
     <div class="todo-list">
       ${todos.map((todo,idx)=>`
-        <label class="todo-item">
+        <label class="todo-item" data-source-id="${escAttr((todo.source_ids||[])[0]||"")}">
           <input type="checkbox" checked data-todo-index="${idx}"/>
-          <span class="todo-content">
-            <strong>${escHtml(todo.title||"Todo")}</strong>
-            ${todo.due?`<em>${escHtml(todo.due)}</em>`:""}
-            ${todo.details?`<small>${escHtml(todo.details)}</small>`:""}
+          <span class="todo-edit">
+            <input class="todo-title" type="text" value="${escAttr(todo.title||"Todo")}" placeholder="Title"/>
+            <input class="todo-due" type="date" value="${escAttr(normalizeTodoDate(todo.due_date||todo.due||""))}" title="${escAttr(todo.due_date||todo.due||"")}" aria-label="Due date"/>
+            <textarea class="todo-description" placeholder="Description">${escHtml(descriptionWithRawDue(todo.description||todo.details||"",todo.due_date||todo.due||""))}</textarea>
+            <input class="todo-tags" type="text" value="${escAttr((todo.tags||[]).join(", "))}" placeholder="Tags"/>
+            <input class="todo-location" type="text" value="${escAttr(todo.location||"")}" placeholder="Location"/>
           </span>
         </label>
       `).join("")}
     </div>`;
+  box.querySelectorAll(".todo-item").forEach(item=>{
+    item.addEventListener("click",ev=>{
+      if(ev.target.matches("input,textarea"))return;
+      const id=item.dataset.sourceId;
+      if(id)showTodoSourceEmail(id,item);
+    });
+    item.addEventListener("focusin",()=>{
+      const id=item.dataset.sourceId;
+      if(id)showTodoSourceEmail(id,item);
+    });
+  });
+}
+
+function escAttr(s){return escHtml(String(s??"")).replace(/"/g,"&quot;");}
+
+function normalizeTodoDate(value){
+  const text=String(value||"").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:"";
+}
+
+function descriptionWithRawDue(description,due){
+  const desc=String(description||"").trim();
+  const text=String(due||"").trim();
+  if(!text||normalizeTodoDate(text))return desc;
+  return [desc,`Due: ${text}`].filter(Boolean).join("\n");
+}
+
+async function showTodoSourceEmail(emailId,itemEl=null){
+  try{
+    document.querySelectorAll(".todo-item.active").forEach(el=>el.classList.remove("active"));
+    itemEl?.classList.add("active");
+    document.getElementById("todo-current-email").innerHTML='<div class="todo-empty">Loading source email…</div>';
+    const mail=await fetch(`/api/email/${encodeURIComponent(emailId)}`).then(r=>r.json());
+    if(mail.error)throw new Error(mail.error);
+    const progressText=document.getElementById("todo-progress-count").textContent.split("/");
+    updateTodoProgress({
+      current:Number(progressText[0]?.trim())||0,
+      total:Number(progressText[1]?.trim())||0,
+      current_email:{
+        subject:mail.subject||"(no subject)",
+        sender:mail.sender||"",
+        date:mail.date||"",
+        body:(mail.body_text||"").trim(),
+      },
+    });
+  }catch(err){
+    document.getElementById("todo-current-email").innerHTML=`<div class="todo-empty">Could not load source email: ${escHtml(err.message)}</div>`;
+  }
 }
 
 function todoFilterPayload(){
@@ -1589,19 +1699,20 @@ function todoFilterPayload(){
     search:document.getElementById("todo-search").value.trim(),
     start_date:document.getElementById("todo-start-date").value,
     end_date:document.getElementById("todo-end-date").value,
+    email_id:todoSingleEmailId,
   };
 }
 
-document.getElementById("btn-filter-todos").addEventListener("click",async()=>{
-  const btn=document.getElementById("btn-filter-todos");
+async function refreshTodoPreview(){
   const llmBtn=document.getElementById("btn-start-todo-llm");
   const box=document.getElementById("todos-results");
   const payload=todoFilterPayload();
-  btn.disabled=true;
   llmBtn.hidden=true;
+  document.getElementById("btn-export-todos").hidden=true;
+  document.getElementById("btn-create-ews-todos").hidden=true;
   todoPendingPayload=null;
   try{
-    box.innerHTML='<div class="todo-empty">Counting matching local emails…</div>';
+    document.getElementById("todo-live-count").textContent="Counting…";
     const preview=await fetch("/api/todos/preview",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -1611,45 +1722,175 @@ document.getElementById("btn-filter-todos").addEventListener("click",async()=>{
       box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(preview.data.error||"?")}</div>`;
       return;
     }
+    todoLatestCount=preview.data.analyzed||0;
+    const capped=preview.data.matched>preview.data.analyzed?` of ${preview.data.matched} matched, capped at ${preview.data.limit}`:"";
+    document.getElementById("todo-live-count").textContent=todoSingleEmailId?`${preview.data.analyzed} selected email`:`${preview.data.analyzed} emails selected${capped}`;
     if(!preview.data.matched){
       box.innerHTML='<div class="todo-empty">No emails match these filters.</div>';
       return;
     }
-    const message=`${preview.data.analyzed} local emails will be scanned individually by the LLM${preview.data.matched>preview.data.analyzed?` (${preview.data.matched} matched locally, capped at ${preview.data.limit})`: ""}.`;
+    const message=todoSingleEmailId
+      ?`${preview.data.analyzed} selected email will be scanned by the LLM.`
+      :`${preview.data.analyzed} local emails will be scanned individually by the LLM${preview.data.matched>preview.data.analyzed?` (${preview.data.matched} matched locally, capped at ${preview.data.limit})`: ""}.`;
     todoPendingPayload=payload;
     llmBtn.hidden=false;
-    box.innerHTML=`<div class="todo-empty">${escHtml(message)}<br>Adjust the filters and press Filter again, or press Start LLM to continue.</div>`;
+    box.innerHTML=`<div class="todo-empty">${escHtml(message)}<br>Adjust the filters or press Convert using LLM to continue.</div>`;
+  }catch(err){
+    box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
+    document.getElementById("todo-live-count").textContent="Count unavailable";
+  }
+}
+
+["todo-search","todo-start-date","todo-end-date"].forEach(id=>{
+  document.getElementById(id).addEventListener("input",()=>{
+    clearTimeout(todoPreviewTimer);
+    todoPreviewTimer=setTimeout(refreshTodoPreview,250);
+  });
+});
+
+async function startTodoLlm({skipConfirm=false}={}){
+  const btn=document.getElementById("btn-start-todo-llm");
+  const box=document.getElementById("todos-results");
+  const payload=todoPendingPayload;
+  if(!payload){
+    box.innerHTML='<div class="todo-empty">Wait for the live email count first.</div>';
+    btn.hidden=true;
+    return;
+  }
+  const count=todoLatestCount||0;
+  const msg=`Scan ${count} local email${count===1?"":"s"} with the active LLM?\n\nEach email will be sent as a separate request. Emails without a concrete action should produce no todo.`;
+  if(!skipConfirm&&!confirm(msg))return;
+  btn.disabled=true;
+  try{
+    box.innerHTML='<div class="todo-empty">Starting todo extraction…</div>';
+    updateTodoProgress({current:0,total:count,current_email:null,status:"queued"});
+    const started=await fetch("/api/todos/start",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload),
+    }).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!started.ok){
+      box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(started.data.error||"?")}</div>`;
+      return;
+    }
+    pollTodoJob(started.data.job_id);
   }catch(err){
     box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
   }finally{
     btn.disabled=false;
   }
-});
+}
 
-document.getElementById("btn-start-todo-llm").addEventListener("click",async()=>{
-  const btn=document.getElementById("btn-start-todo-llm");
-  const box=document.getElementById("todos-results");
-  const payload=todoPendingPayload;
-  if(!payload){
-    box.innerHTML='<div class="todo-empty">Press Filter first.</div>';
-    btn.hidden=true;
+document.getElementById("btn-start-todo-llm").addEventListener("click",()=>startTodoLlm());
+
+function updateTodoProgress(job){
+  const total=job.total||0,current=job.current||0;
+  document.getElementById("todo-progress-count").textContent=`${current} / ${total}`;
+  document.getElementById("todo-progress-fill").style.width=total?`${Math.round(current/total*100)}%`:"0%";
+  const box=document.getElementById("todo-current-email");
+  const mail=job.current_email;
+  if(!mail){
+    box.innerHTML='<div class="todo-empty">Convert with the LLM to process the filtered emails.</div>';
     return;
   }
-  btn.disabled=true;
+  box.innerHTML=`
+    <div class="todo-current-card">
+      <strong>${escHtml(mail.subject||"(no subject)")}</strong>
+      <small>${escHtml(mail.sender||"")}<br>${escHtml(mail.date||"")}</small>
+      <pre>${escHtml(mail.body||"[No body text]")}</pre>
+    </div>`;
+}
+
+function pollTodoJob(jobId){
+  clearInterval(todoJobTimer);
+  todoJobTimer=setInterval(async()=>{
+    try{
+      const job=await fetch(`/api/todos/status/${encodeURIComponent(jobId)}`).then(r=>r.json());
+      if(job.error)throw new Error(job.error);
+      updateTodoProgress(job);
+      if(job.status==="done"){
+        clearInterval(todoJobTimer);
+        renderTodoResults({todos:job.todos||[],matched:job.matched||0,analyzed:job.total||0});
+        setStatus("Todo extraction done","ok");
+      }else if(job.status==="error"){
+        clearInterval(todoJobTimer);
+        document.getElementById("todos-results").innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(job.error||"?")}</div>`;
+        setStatus("Todo extraction failed","err");
+      }else{
+        document.getElementById("todos-results").innerHTML=`<div class="todo-empty">Scanning emails… ${job.current||0} / ${job.total||0}</div>`;
+      }
+    }catch(err){
+      clearInterval(todoJobTimer);
+      document.getElementById("todos-results").innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
+    }
+  },900);
+}
+
+function selectedTodosForExport(){
+  return [...document.querySelectorAll(".todo-item")].filter(item=>item.querySelector("input[type=checkbox]")?.checked).map(item=>{
+    const tags=(item.querySelector(".todo-tags")?.value||"").split(",").map(s=>s.trim()).filter(Boolean);
+    return {
+      title:item.querySelector(".todo-title")?.value.trim()||"",
+      due_date:item.querySelector(".todo-due")?.value.trim()||"",
+      description:item.querySelector(".todo-description")?.value.trim()||"",
+      tags,
+      location:item.querySelector(".todo-location")?.value.trim()||"",
+    };
+  }).filter(todo=>todo.title);
+}
+
+document.getElementById("btn-export-todos").addEventListener("click",async()=>{
+  const todos=selectedTodosForExport();
+  if(!todos.length){setStatus("No selected todos to export","err");return;}
   try{
-    box.innerHTML='<div class="todo-empty">Asking the LLM to scan each email individually…</div>';
-    const data=await fetch("/api/todos/find",{
+    const res=await fetch("/api/todos/export_ics",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(payload),
+      body:JSON.stringify({todos}),
+    });
+    if(!res.ok)throw new Error("Export failed");
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download="email-assistant-todos.ics";
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Exported todos as .ics","ok");
+  }catch(err){setStatus("Todo export failed: "+err.message,"err");}
+});
+
+document.getElementById("btn-create-ews-todos").addEventListener("click",async()=>{
+  const todos=selectedTodosForExport();
+  if(!todos.length){setStatus("No selected todos to create","err");return;}
+  if(!currentAccountId){
+    setStatus("Select an account before creating Exchange tasks","err");
+    document.getElementById("todo-current-email").innerHTML='<div class="todo-empty">Select an account/folder on the left before creating Exchange tasks.</div>';
+    return;
+  }
+  const msg=`Create ${todos.length} task${todos.length===1?"":"s"} in the Exchange account via EWS?\n\nThis writes to the remote account's Tasks folder.`;
+  if(!confirm(msg))return;
+  const btn=document.getElementById("btn-create-ews-todos");
+  btn.disabled=true;
+  try{
+    setStatus("Creating Exchange tasks…","busy");
+    const result=await fetch("/api/todos/export_ews",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({account_id:currentAccountId||"",todos}),
     }).then(async r=>({ok:r.ok,data:await r.json()}));
-    if(!data.ok){
-      box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(data.data.error||"?")}</div>`;
-      return;
-    }
-    renderTodoResults(data.data);
+    if(!result.ok||!result.data.success)throw new Error(result.data.error||"Exchange task creation failed");
+    const created=result.data.created||todos.length;
+    setStatus(`Created ${created} Exchange task${created===1?"":"s"}`,"ok");
+    document.getElementById("todo-current-email").innerHTML=`
+      <div class="todo-current-card">
+        <strong>Exchange Tasks Created</strong>
+        <small>${created} task${created===1?"":"s"} written to the selected account's Exchange Tasks folder via EWS.${result.data.url?`<br>${escHtml(result.data.url)}`:""}<br>Refresh Outlook / Tasks if they do not appear immediately.</small>
+        <button class="rbtn todo-action" type="button" id="btn-close-todo-success">Close</button>
+      </div>`;
+    document.getElementById("btn-close-todo-success")?.addEventListener("click",closeTodoPopover);
   }catch(err){
-    box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
+    setStatus("Exchange tasks failed: "+err.message,"err");
+    document.getElementById("todo-current-email").innerHTML=`<div class="todo-empty">Exchange task creation failed: ${escHtml(err.message)}</div>`;
   }finally{
     btn.disabled=false;
   }
@@ -1657,6 +1898,9 @@ document.getElementById("btn-start-todo-llm").addEventListener("click",async()=>
 
 function closeTodoPopover(){
   const popover=document.getElementById("todo-popover");
+  clearInterval(todoJobTimer);
+  todoSingleEmailId="";
+  ["todo-search","todo-start-date","todo-end-date"].forEach(id=>document.getElementById(id).disabled=false);
   if(popover.close)popover.close();
   else popover.removeAttribute("open");
 }
@@ -2100,6 +2344,7 @@ loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(t
 // ─── Init ─────────────────────────────────────────────────────────────────
 loadFolders();
 setStatus("Ready","idle");
+refreshFinishedToday();
 loadActiveLlmPicker();
 loadQuickTemplates();
 

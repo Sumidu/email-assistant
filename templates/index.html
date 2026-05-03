@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='todo-filter-20260503') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='email-actions-color-20260503') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -15,7 +15,7 @@
     <div id="header-actions">
       <button class="hbtn accent" id="btn-sync">&#8635; Sync All</button>
       <div id="todo-finder-wrap">
-        <button class="hbtn" id="btn-find-todos">&#9745; Todos</button>
+        <button class="hbtn todo-action" id="btn-find-todos">&#9745; Todos</button>
       </div>
       <button class="hbtn calendar-action" id="btn-calendar">&#128197; Calendar</button>
       <button class="hbtn kb-action" id="btn-build-kb">&#9670; Update Knowledge Base</button>
@@ -43,11 +43,12 @@
         <div id="email-panel-header">
           <div class="meta-block">
             <div id="email-subject" style="color:var(--dim);">No message selected</div>
-            <div id="email-meta"></div>
+          <div id="email-meta"></div>
           </div>
           <div id="email-panel-actions">
-            <button class="rbtn" id="btn-generate-contact-kb" style="display:none;">Generate Knowledge</button>
-            <button class="rbtn primary icon-action" id="btn-mark-done" style="display:none;" title="Done">&#10003;</button>
+            <button class="rbtn kb-action" id="btn-generate-contact-kb" style="display:none;">&#9670; Generate Knowledge</button>
+            <button class="rbtn todo-action" id="btn-email-find-todos" style="display:none;">&#9745; Find Todos</button>
+            <button class="rbtn primary finish-action icon-action" id="btn-mark-done" style="display:none;" title="Done">&#10003;</button>
           </div>
         </div>
         <div id="email-body" class="placeholder">Select a message</div>
@@ -87,6 +88,8 @@
 
   <footer id="statusbar">
     <div class="sb-seg"><div class="sb-dot" id="status-dot"></div><span id="status-msg">Ready</span></div>
+    <span class="sb-sep">|</span>
+    <div class="sb-seg success-counter" id="finished-today-seg"><span id="finished-today-count">0 finished today</span></div>
     <span class="sb-sep">|</span>
     <div class="sb-seg" id="llm-picker-seg" style="margin-left:auto;">
       <span id="status-model" style="color:var(--dim);">LLM</span>
@@ -422,34 +425,50 @@
     <strong>Find Todos</strong>
     <button id="todo-popover-close" type="button">&#215;</button>
   </div>
-  <div id="todos-controls">
-    <div class="field-group">
-      <label>Search filter</label>
-      <input id="todo-search" type="text" placeholder="Optional words in emails" autocomplete="off"/>
-    </div>
-    <div class="field-row">
-      <div class="field-group">
-        <label>From date</label>
-        <input id="todo-start-date" type="date" autocomplete="off"/>
+  <div id="todo-finder-body">
+    <div id="todo-filter-pane">
+      <div id="todos-controls">
+        <div class="field-group">
+          <label>Search filter</label>
+          <input id="todo-search" type="text" placeholder="Optional words in emails" autocomplete="off"/>
+        </div>
+        <div class="field-row">
+          <div class="field-group">
+            <label>From date</label>
+            <input id="todo-start-date" type="date" autocomplete="off"/>
+          </div>
+          <div class="field-group">
+            <label>To date</label>
+            <input id="todo-end-date" type="date" autocomplete="off"/>
+          </div>
+        </div>
+        <div class="field-hint">Runs over locally stored emails in the selected folder/account.</div>
+        <div id="todo-live-count" class="todo-count">Counting…</div>
+        <div class="todo-actions">
+          <button class="rbtn primary todo-action" id="btn-start-todo-llm" hidden>Convert using LLM</button>
+          <button class="rbtn" id="btn-export-todos" hidden>Download .ics</button>
+          <button class="rbtn todo-action" id="btn-create-ews-todos" hidden>Add to Exchange</button>
+        </div>
       </div>
-      <div class="field-group">
-        <label>To date</label>
-        <input id="todo-end-date" type="date" autocomplete="off"/>
+      <div id="todos-results">
+        <div class="todo-empty">Choose filters, then start.</div>
       </div>
     </div>
-    <div class="field-hint">Runs over locally stored emails in the selected folder/account.</div>
-    <div class="todo-actions">
-      <button class="rbtn primary generate-action" id="btn-filter-todos">Filter</button>
-      <button class="rbtn primary generate-action" id="btn-start-todo-llm" hidden>Start LLM</button>
+    <div id="todo-progress-pane">
+      <div class="todo-progress-head">
+        <strong>Processing</strong>
+        <span id="todo-progress-count">0 / 0</span>
+      </div>
+      <div class="todo-progress-bar"><div id="todo-progress-fill"></div></div>
+      <div id="todo-current-email" class="todo-current-email">
+        <div class="todo-empty">Convert with the LLM to process the filtered emails.</div>
+      </div>
     </div>
-  </div>
-  <div id="todos-results">
-    <div class="todo-empty">Choose filters, then start.</div>
   </div>
 </dialog>
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='todo-filter-20260503') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='email-actions-color-20260503') }}"></script>
 </body>
 </html>

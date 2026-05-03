@@ -47,3 +47,8 @@ def unmark_email_done(email_id):
     result = database.unmark_email_done(email_id)
     status = 200 if result.get("success") else 404
     return jsonify(result), status
+
+
+@bp.route("/stats/today")
+def today_stats():
+    return jsonify({"finished_today": database.get_finished_today_count()})

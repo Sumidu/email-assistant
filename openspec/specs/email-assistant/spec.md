@@ -259,6 +259,63 @@ The application SHALL show the selected email and allow local-only triage action
 - **THEN** the application SHALL offer an unarchive action
 - **AND** activating it SHALL remove the local finished marker and return the email to its previous local folder context where possible.
 
+### Requirement: Todo discovery from email
+
+The application SHALL help the user find actionable todos in locally stored emails without mutating the remote mailbox.
+
+#### Scenario: Live-filter todo candidates by email scope
+
+- **WHEN** the user opens the todo finder
+- **THEN** the default date range SHALL cover the previous 7 days through today
+- **AND** the window SHALL live-count matching local emails for the selected account, folder, date range, and search filter without requiring a separate filter click
+- **AND** the user MAY press Filter to refresh the count explicitly after editing the filter.
+
+#### Scenario: Confirm LLM todo scanning
+
+- **WHEN** the user starts todo extraction for the current filtered email set
+- **THEN** the application SHALL show a confirmation dialog
+- **AND** the confirmation SHALL warn how many local emails will be individually sent to the selected LLM for scanning.
+
+#### Scenario: Process emails individually
+
+- **WHEN** todo extraction runs
+- **THEN** the application SHALL send each selected email to the LLM as an individual request
+- **AND** it SHALL avoid generating a todo when the email does not contain a concrete action for the user
+- **AND** it SHALL log each LLM request in the local log.
+
+#### Scenario: Show todo extraction progress
+
+- **WHEN** todo extraction is running
+- **THEN** the todo finder SHALL show a progress bar, numeric progress such as `10 / 241`, and a preview of the current email being processed.
+
+#### Scenario: Parse todo output safely
+
+- **WHEN** an LLM response contains reasoning, prose, Markdown fences, or malformed non-JSON text
+- **THEN** the application SHALL NOT treat each response line as a todo
+- **AND** it SHALL only accept structured todo objects that can be parsed from the final JSON output.
+
+#### Scenario: Use reminder-compatible todo fields
+
+- **WHEN** todo candidates are displayed
+- **THEN** each todo SHALL include editable fields for title, due date, description, tags, and location.
+
+#### Scenario: Export todos to a reminder system
+
+- **WHEN** the user selects todo candidates to use
+- **THEN** the application SHALL allow exporting the selected todos as a VTODO/iCalendar file for compatible reminder or calendar clients
+- **AND** it SHALL allow creating tasks in a selected Exchange account through EWS when EWS NTLM is configured
+- **AND** it SHALL ask for explicit confirmation before writing tasks to the remote Exchange account.
+
+### Requirement: Email triage motivation
+
+The application SHALL show lightweight feedback that helps the user continue processing email.
+
+#### Scenario: Show today's finished mail count
+
+- **WHEN** the main window is visible
+- **THEN** the lower-left status area SHALL show how many emails the user has marked finished today
+- **AND** the count SHALL update after finishing or unarchiving emails.
+
 ### Requirement: Draft generation and chat
 
 The application SHALL generate draft replies and chat responses from selected email context.

@@ -1,4 +1,5 @@
 import re
+import html
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse
 import xml.etree.ElementTree as ET
@@ -159,6 +160,61 @@ def _ews_find_calendar_items_xml(start: datetime, end: datetime) -> str:
         <t:DistinguishedFolderId Id="calendar" />
       </m:ParentFolderIds>
     </m:FindItem>
+  </soap:Body>
+</soap:Envelope>"""
+
+
+def _ews_create_tasks_xml(todos: list[dict]) -> str:
+    items = []
+    for todo in todos:
+        title = html.escape(str(todo.get("title") or "").strip())
+        if not title:
+            continue
+        description_parts = [str(todo.get("description") or "").strip()]
+        location = str(todo.get("location") or "").strip()
+        if location:
+            description_parts.append(f"Location: {location}")
+        tags = todo.get("tags") if isinstance(todo.get("tags"), list) else []
+        if tags:
+            description_parts.append("Tags: " + ", ".join(str(tag) for tag in tags if str(tag).strip()))
+        body = html.escape("\n".join(part for part in description_parts if part))
+        due = str(todo.get("due_date") or "").strip()
+        due_xml = ""
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", due):
+            due_xml = f"<t:DueDate>{due}T12:00:00Z</t:DueDate>"
+        elif due:
+            body = html.escape((html.unescape(body) + f"\nDue: {due}").strip())
+        categories = "".join(
+            f"<t:String>{html.escape(str(tag).strip())}</t:String>"
+            for tag in tags
+            if str(tag).strip()
+        )
+        categories_xml = f"<t:Categories>{categories}</t:Categories>" if categories else ""
+        items.append(f"""
+          <t:Task>
+            <t:Subject>{title}</t:Subject>
+            <t:Body BodyType="Text">{body}</t:Body>
+            {categories_xml}
+            {due_xml}
+            <t:Status>NotStarted</t:Status>
+          </t:Task>""")
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2013" />
+  </soap:Header>
+  <soap:Body>
+    <m:CreateItem MessageDisposition="SaveOnly">
+      <m:SavedItemFolderId>
+        <t:DistinguishedFolderId Id="tasks" />
+      </m:SavedItemFolderId>
+      <m:Items>
+        {"".join(items)}
+      </m:Items>
+    </m:CreateItem>
   </soap:Body>
 </soap:Envelope>"""
 
@@ -415,6 +471,58 @@ def sync_ews_ntlm_calendar(account: dict, start: datetime, end: datetime, progre
                     "chunks": ok_chunks,
                 })
     return {"success": False, "error": "EWS NTLM calendar sync failed.", "attempts": errors}
+
+
+def create_ews_ntlm_tasks(account: dict, todos: list[dict]) -> dict:
+    imap = account.get("imap", {})
+    username = (imap.get("username") or "").strip()
+    password = imap.get("password") or ""
+    todos = [todo for todo in todos if isinstance(todo, dict) and str(todo.get("title") or "").strip()]
+    if not todos:
+        return {"success": False, "error": "No selected todos to create."}
+    if not username or not password or password == "••••••••":
+        return {"success": False, "error": "Username and saved account password are required for EWS task creation."}
+
+    headers = {
+        "Content-Type": "text/xml; charset=utf-8",
+        "Accept": "text/xml",
+        "User-Agent": "EmailAssistant-EWS-NTLM-Tasks/1.0",
+    }
+    body = _ews_create_tasks_xml(todos).encode("utf-8")
+    errors = []
+    for url in _ews_urls(account):
+        for ntlm_user in _ntlm_username_variants(username):
+            try:
+                resp = requests.post(
+                    url,
+                    data=body,
+                    headers=headers,
+                    auth=HttpNtlmAuth(ntlm_user, password),
+                    timeout=30,
+                    allow_redirects=True,
+                )
+                ok = resp.status_code == 200 and "ResponseClass=\"Success\"" in resp.text
+                if ok:
+                    return {
+                        "success": True,
+                        "method": "ews_ntlm",
+                        "url": url,
+                        "username_format": "domain\\user" if "\\" in ntlm_user else "email",
+                        "created": len(todos),
+                    }
+                errors.append({
+                    "url": url,
+                    "username_format": "domain\\user" if "\\" in ntlm_user else "email",
+                    "status": resp.status_code,
+                    "error": _ews_error_summary(resp.text[:1600]),
+                })
+            except requests.RequestException as exc:
+                errors.append({
+                    "url": url,
+                    "username_format": "domain\\user" if "\\" in ntlm_user else "email",
+                    "error": str(exc),
+                })
+    return {"success": False, "error": "EWS NTLM task creation failed.", "attempts": errors}
 
 
 def start_graph_device_code(client_id: str, tenant_id: str = "common") -> dict:

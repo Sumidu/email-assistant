@@ -230,11 +230,18 @@ def search_emails_for_todos(
     search="",
     start_date="",
     end_date="",
+    email_id="",
     limit=250,
 ):
     conn = get_connection()
-    where = ["folder = ?"]
-    params = [folder]
+    where = []
+    params = []
+    if email_id:
+        where.append("id = ?")
+        params.append(email_id)
+    else:
+        where.append("folder = ?")
+        params.append(folder)
     if account_id:
         where.append("account_id = ?")
         params.append(account_id)
@@ -381,6 +388,15 @@ def mark_emails_kb_processed(ids: list):
     )
     conn.commit()
     conn.close()
+
+
+def get_finished_today_count() -> int:
+    conn = get_connection()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM emails WHERE done_at >= datetime('now', 'localtime', 'start of day')"
+    ).fetchone()[0]
+    conn.close()
+    return int(count or 0)
 
 
 def get_email_count(account_id=None):
