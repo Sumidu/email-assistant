@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='todo-filter-20260503') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -14,6 +14,9 @@
     <div id="search-wrap"><span class="ico">&#128269;</span><input id="search-input" type="text" placeholder="Search subject / sender…" autocomplete="off"/></div>
     <div id="header-actions">
       <button class="hbtn accent" id="btn-sync">&#8635; Sync All</button>
+      <div id="todo-finder-wrap">
+        <button class="hbtn" id="btn-find-todos">&#9745; Todos</button>
+      </div>
       <button class="hbtn calendar-action" id="btn-calendar">&#128197; Calendar</button>
       <button class="hbtn kb-action" id="btn-build-kb">&#9670; Update Knowledge Base</button>
       <button class="hbtn kb-action" id="btn-view-kb">&#128196; View KB</button>
@@ -361,6 +364,10 @@
           <label>Contact profile user prompt</label>
           <textarea id="cfg-prompt-contact-user" spellcheck="false"></textarea>
         </div>
+        <div class="field-group prompt-field">
+          <label>Todo extraction system prompt</label>
+          <textarea id="cfg-prompt-todo-system" spellcheck="false"></textarea>
+        </div>
       </div>
 
       <!-- Logs -->
@@ -410,8 +417,39 @@
   </div>
 </div>
 
+<dialog id="todo-popover">
+  <div class="todo-popover-head">
+    <strong>Find Todos</strong>
+    <button id="todo-popover-close" type="button">&#215;</button>
+  </div>
+  <div id="todos-controls">
+    <div class="field-group">
+      <label>Search filter</label>
+      <input id="todo-search" type="text" placeholder="Optional words in emails" autocomplete="off"/>
+    </div>
+    <div class="field-row">
+      <div class="field-group">
+        <label>From date</label>
+        <input id="todo-start-date" type="date" autocomplete="off"/>
+      </div>
+      <div class="field-group">
+        <label>To date</label>
+        <input id="todo-end-date" type="date" autocomplete="off"/>
+      </div>
+    </div>
+    <div class="field-hint">Runs over locally stored emails in the selected folder/account.</div>
+    <div class="todo-actions">
+      <button class="rbtn primary generate-action" id="btn-filter-todos">Filter</button>
+      <button class="rbtn primary generate-action" id="btn-start-todo-llm" hidden>Start LLM</button>
+    </div>
+  </div>
+  <div id="todos-results">
+    <div class="todo-empty">Choose filters, then start.</div>
+  </div>
+</dialog>
+
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='todo-filter-20260503') }}"></script>
 </body>
 </html>

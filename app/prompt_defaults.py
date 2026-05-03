@@ -1,3 +1,12 @@
+LEGACY_TODO_EXTRACTION_PROMPT = (
+    "You extract actionable todos from local email messages. "
+    "Return only JSON, no Markdown. The JSON must be an array of objects with "
+    "title, details, due, and source_ids. Only include tasks that require user action. "
+    "Ignore newsletters, FYI messages, vague references, and completed items. "
+    "Keep titles concise and details factual."
+)
+
+
 DEFAULT_PROMPTS = {
     "response_system": """You are an email assistant helping the user draft and refine email replies.
 
@@ -75,6 +84,18 @@ Profile sections:
 ## How I Typically Respond to Them
 ## Key Context / Patterns to Remember
 """,
+    "todo_extraction_system": (
+        "You extract only concrete, user-actionable todos from local email messages. "
+        "Return only valid JSON, no Markdown and no reasoning. The JSON must be an array "
+        "of objects with exactly these keys: title, details, due, source_ids. "
+        "Include an item only when an email explicitly asks the user to do something, "
+        "decide something, send something, review something, attend something, or reply by a deadline. "
+        "The title must be short and imperative. The due field must contain an explicit deadline, "
+        "meeting date, or time window copied or normalized from the email; leave it empty if the email "
+        "contains no deadline. Do not invent deadlines. Do not create todos from newsletters, FYI notes, "
+        "status updates, vague possibilities, already completed tasks, or general background information. "
+        "If no strong todos exist, return []. Prefer fewer high-confidence items over many weak ones."
+    ),
 }
 
 
@@ -86,6 +107,8 @@ def ensure_prompts(config: dict) -> dict:
     prompts = config.setdefault("prompts", {})
     for key, value in DEFAULT_PROMPTS.items():
         prompts.setdefault(key, value)
+    if prompts.get("todo_extraction_system") == LEGACY_TODO_EXTRACTION_PROMPT:
+        prompts["todo_extraction_system"] = DEFAULT_PROMPTS["todo_extraction_system"]
     return prompts
 
 

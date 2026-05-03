@@ -15,6 +15,7 @@ bp = Blueprint("config", __name__, url_prefix="/api")
 
 @bp.route("/config", methods=["GET"])
 def get_config():
+    prompt_defaults.ensure_prompts(rt.config)
     safe = {k: v for k, v in rt.config.items() if k != "accounts"}
     safe = json.loads(json.dumps(safe))
     if safe.get("lm_studio", {}).get("api_key"):

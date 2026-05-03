@@ -934,6 +934,7 @@ const PROMPT_FIELDS={
   knowledge_style_user:"cfg-prompt-style-user",
   knowledge_contact_system:"cfg-prompt-contact-system",
   knowledge_contact_user:"cfg-prompt-contact-user",
+  todo_extraction_system:"cfg-prompt-todo-system",
 };
 
 const LM_PRESETS={
@@ -1518,7 +1519,156 @@ document.getElementById("btn-build-kb").addEventListener("click",async()=>{
 });
 document.getElementById("btn-view-kb").addEventListener("click",openKnowledge);
 document.getElementById("btn-calendar").addEventListener("click",openCalendar);
+document.getElementById("btn-find-todos").addEventListener("click",openTodosModal);
 document.getElementById("btn-settings").addEventListener("click",()=>{loadSettings();openModal("settings-modal");settingsFooterMode("list");switchTab("tab-accounts");});
+
+// ─── Todo finder ──────────────────────────────────────────────────────────
+let todoPendingPayload=null;
+
+function openTodosModal(){
+  const today=new Date();
+  const monthBack=new Date(today);
+  monthBack.setMonth(monthBack.getMonth()-1);
+  document.getElementById("todo-search").value=searchInput.value.trim();
+  document.getElementById("todo-start-date").value=formatDateInput(monthBack);
+  document.getElementById("todo-end-date").value=formatDateInput(today);
+  document.getElementById("todos-results").innerHTML='<div class="todo-empty">Choose filters, then filter.</div>';
+  document.getElementById("btn-filter-todos").disabled=false;
+  document.getElementById("btn-start-todo-llm").hidden=true;
+  document.getElementById("btn-start-todo-llm").disabled=false;
+  todoPendingPayload=null;
+  const popover=document.getElementById("todo-popover");
+  const shouldOpen=!popover.open;
+  if(shouldOpen){
+    const rect=document.getElementById("btn-find-todos").getBoundingClientRect();
+    popover.style.top=(rect.bottom+6)+"px";
+    popover.style.right=Math.max(10,window.innerWidth-rect.right)+"px";
+    if(popover.showModal)popover.showModal();
+    else if(popover.show)popover.show();
+    else popover.setAttribute("open","");
+  }else{
+    if(popover.close)popover.close();
+    else popover.removeAttribute("open");
+  }
+}
+
+function formatDateInput(date){
+  const y=date.getFullYear();
+  const m=String(date.getMonth()+1).padStart(2,"0");
+  const d=String(date.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+
+function renderTodoResults(data){
+  const box=document.getElementById("todos-results");
+  const todos=data.todos||[];
+  if(!todos.length){
+    box.innerHTML=`<div class="todo-empty">No actionable todos found in ${data.analyzed||0} analyzed emails.</div>`;
+    return;
+  }
+  box.innerHTML=`
+    <div class="todo-summary">${todos.length} candidates from ${data.analyzed||0} analyzed emails${data.matched>data.analyzed?` (${data.matched} matched locally)`: ""}</div>
+    <div class="todo-list">
+      ${todos.map((todo,idx)=>`
+        <label class="todo-item">
+          <input type="checkbox" checked data-todo-index="${idx}"/>
+          <span class="todo-content">
+            <strong>${escHtml(todo.title||"Todo")}</strong>
+            ${todo.due?`<em>${escHtml(todo.due)}</em>`:""}
+            ${todo.details?`<small>${escHtml(todo.details)}</small>`:""}
+          </span>
+        </label>
+      `).join("")}
+    </div>`;
+}
+
+function todoFilterPayload(){
+  return {
+    account_id:currentAccountId||"",
+    folder:currentFolder||"INBOX",
+    search:document.getElementById("todo-search").value.trim(),
+    start_date:document.getElementById("todo-start-date").value,
+    end_date:document.getElementById("todo-end-date").value,
+  };
+}
+
+document.getElementById("btn-filter-todos").addEventListener("click",async()=>{
+  const btn=document.getElementById("btn-filter-todos");
+  const llmBtn=document.getElementById("btn-start-todo-llm");
+  const box=document.getElementById("todos-results");
+  const payload=todoFilterPayload();
+  btn.disabled=true;
+  llmBtn.hidden=true;
+  todoPendingPayload=null;
+  try{
+    box.innerHTML='<div class="todo-empty">Counting matching local emails…</div>';
+    const preview=await fetch("/api/todos/preview",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload),
+    }).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!preview.ok){
+      box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(preview.data.error||"?")}</div>`;
+      return;
+    }
+    if(!preview.data.matched){
+      box.innerHTML='<div class="todo-empty">No emails match these filters.</div>';
+      return;
+    }
+    const message=`${preview.data.analyzed} local emails will be scanned individually by the LLM${preview.data.matched>preview.data.analyzed?` (${preview.data.matched} matched locally, capped at ${preview.data.limit})`: ""}.`;
+    todoPendingPayload=payload;
+    llmBtn.hidden=false;
+    box.innerHTML=`<div class="todo-empty">${escHtml(message)}<br>Adjust the filters and press Filter again, or press Start LLM to continue.</div>`;
+  }catch(err){
+    box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+document.getElementById("btn-start-todo-llm").addEventListener("click",async()=>{
+  const btn=document.getElementById("btn-start-todo-llm");
+  const box=document.getElementById("todos-results");
+  const payload=todoPendingPayload;
+  if(!payload){
+    box.innerHTML='<div class="todo-empty">Press Filter first.</div>';
+    btn.hidden=true;
+    return;
+  }
+  btn.disabled=true;
+  try{
+    box.innerHTML='<div class="todo-empty">Asking the LLM to scan each email individually…</div>';
+    const data=await fetch("/api/todos/find",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload),
+    }).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!data.ok){
+      box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(data.data.error||"?")}</div>`;
+      return;
+    }
+    renderTodoResults(data.data);
+  }catch(err){
+    box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
+  }finally{
+    btn.disabled=false;
+  }
+});
+
+function closeTodoPopover(){
+  const popover=document.getElementById("todo-popover");
+  if(popover.close)popover.close();
+  else popover.removeAttribute("open");
+}
+document.getElementById("todo-popover-close").addEventListener("click",closeTodoPopover);
+document.getElementById("todo-popover").addEventListener("click",e=>{
+  if(e.target.id==="todo-popover")closeTodoPopover();
+});
+document.addEventListener("click",e=>{
+  const wrap=document.getElementById("todo-finder-wrap");
+  const popover=document.getElementById("todo-popover");
+  if(popover.open&&!wrap.contains(e.target)&&!popover.contains(e.target))closeTodoPopover();
+});
 
 // ─── Calendar modal ───────────────────────────────────────────────────────
 function calendarWindow(){

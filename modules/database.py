@@ -224,6 +224,56 @@ def get_email_by_id(email_id):
     return dict(row) if row else None
 
 
+def search_emails_for_todos(
+    folder="INBOX",
+    account_id=None,
+    search="",
+    start_date="",
+    end_date="",
+    limit=250,
+):
+    conn = get_connection()
+    where = ["folder = ?"]
+    params = [folder]
+    if account_id:
+        where.append("account_id = ?")
+        params.append(account_id)
+    search = (search or "").strip()
+    if search:
+        like = f"%{search}%"
+        where.append(
+            """(
+                subject LIKE ? COLLATE NOCASE OR
+                sender LIKE ? COLLATE NOCASE OR
+                recipients LIKE ? COLLATE NOCASE OR
+                body_text LIKE ? COLLATE NOCASE
+            )"""
+        )
+        params.extend([like, like, like, like])
+    if start_date:
+        where.append("date_ts >= strftime('%s', ?)")
+        params.append(start_date)
+    if end_date:
+        where.append("date_ts < strftime('%s', date(?, '+1 day'))")
+        params.append(end_date)
+    params.append(limit)
+    rows = conn.execute(
+        f"""SELECT id, folder, subject, sender, recipients, date, body_text, account_id
+            FROM emails
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
+    count_params = params[:-1]
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM emails WHERE {' AND '.join(where)}",
+        count_params,
+    ).fetchone()[0]
+    conn.close()
+    return {"rows": [dict(r) for r in rows], "total": total}
+
+
 def email_uid_exists(account_id: str, folder: str, uidvalidity: str, imap_uid: int) -> bool:
     conn = get_connection()
     row = conn.execute(

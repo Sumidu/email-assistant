@@ -14,6 +14,7 @@ def create_app(base_dir: str) -> Flask:
     from app.routes.logs import bp as logs_bp
     from app.routes.system import bp as system_bp
     from app.routes.tasks import bp as tasks_bp
+    from app.routes.todos import bp as todos_bp
 
     app = Flask(
         __name__,
@@ -36,6 +37,7 @@ def create_app(base_dir: str) -> Flask:
         chat_bp,
         logs_bp,
         system_bp,
+        todos_bp,
     ):
         app.register_blueprint(bp)
 
