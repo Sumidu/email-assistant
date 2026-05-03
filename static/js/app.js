@@ -246,11 +246,21 @@ async function loadEmailList(append=false,{preserveSelection=false}={}){
   if(!currentFolder)return;
   try{
     const selectedId=preserveSelection?currentEmail?.id:null;
-    const url=`/api/emails?limit=${PAGE_SIZE}&offset=${emailOffset}&folder=${encodeURIComponent(currentFolder)}&account_id=${encodeURIComponent(currentAccountId||"")}`;
-    const emails=await fetch(url).then(r=>r.json());
+    const q=searchInput.value.trim();
+    const qs=new URLSearchParams({
+      limit:String(PAGE_SIZE),
+      offset:String(emailOffset),
+      folder:currentFolder,
+      account_id:currentAccountId||"",
+    });
+    if(q)qs.set("q",q);
+    const emails=await fetch(`/api/emails?${qs.toString()}`).then(r=>r.json());
     if(!append)allEmailsLocal=emails;else allEmailsLocal=allEmailsLocal.concat(emails);
-    emailCount.textContent=allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length;
-    renderVisibleEmailList(append);
+    const hasMore=emails.length>=PAGE_SIZE;
+    emailCount.textContent=q
+      ?`${allEmailsLocal.length}${hasMore?"+":""} found`
+      :(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
+    renderEmailList(emails,append);
     loadMoreBtn.style.display=emails.length>=PAGE_SIZE?"block":"none";
     if(selectedId){
       const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(selectedId)}"]`);
@@ -258,19 +268,6 @@ async function loadEmailList(append=false,{preserveSelection=false}={}){
     }
     return emails;
   }catch(err){setStatus("Error: "+err.message,"err");}
-}
-
-function filteredEmails(){
-  const q=searchInput.value.trim().toLowerCase();
-  if(!q)return allEmailsLocal;
-  return allEmailsLocal.filter(e=>(e.subject||"").toLowerCase().includes(q)||(e.sender||"").toLowerCase().includes(q));
-}
-
-function renderVisibleEmailList(append=false){
-  const visible=append?allEmailsLocal:filteredEmails();
-  renderEmailList(visible,append);
-  const q=searchInput.value.trim();
-  emailCount.textContent=q?visible.length+" found":(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
 }
 
 function renderEmailList(emails,append=false){
@@ -300,7 +297,8 @@ function renderEmailList(emails,append=false){
 searchInput.addEventListener("input",()=>{
   clearTimeout(searchTimer);
   searchTimer=setTimeout(()=>{
-    renderVisibleEmailList();
+    emailOffset=0;
+    loadEmailList();
   },220);
 });
 

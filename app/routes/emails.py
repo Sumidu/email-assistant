@@ -13,11 +13,13 @@ def emails():
     offset = int(request.args.get("offset", 0))
     account_id = request.args.get("account_id") or None
     folder = request.args.get("folder") or "INBOX"
+    search = request.args.get("q") or ""
     rows = database.get_emails(
         folder=folder,
         limit=limit,
         offset=offset,
         account_id=account_id,
+        search=search,
     )
     if rt.kb:
         for row in rows:

@@ -113,7 +113,11 @@ The application SHALL provide a navigable email list grouped by local folders an
 #### Scenario: Search and load emails
 
 - **WHEN** the user searches emails or loads more messages
-- **THEN** the application SHALL filter or append email list results while preserving the selected folder context.
+- **THEN** the application SHALL query locally stored emails for the selected account and folder
+- **AND** it SHALL search across subject, sender, recipients, and plain text body
+- **AND** it SHALL NOT limit search scope to only the currently loaded page of visible messages
+- **AND** it SHALL keep pagination available for additional matching results
+- **AND** it SHALL preserve the selected folder context.
 
 #### Scenario: Show knowledge badges
 
@@ -126,6 +130,100 @@ The application SHALL provide a navigable email list grouped by local folders an
 - **WHEN** the user clicks a knowledge base badge in the email list
 - **THEN** the application SHALL open the knowledge base window
 - **AND** it SHALL select the best matching entry for the email sender or related identity.
+
+### Requirement: Calendar synchronization and storage
+
+The application SHALL support local calendar synchronization for accounts with calendar access.
+
+#### Scenario: Configure calendar support for an account
+
+- **WHEN** the user edits an email account
+- **THEN** the application SHALL allow the user to choose the account/calendar provider type
+- **AND** it SHALL allow enabling or disabling calendar sync for that account
+- **AND** it SHALL keep temporary diagnostic calendar test controls out of the normal account settings UI.
+
+#### Scenario: Sync calendar events locally
+
+- **WHEN** calendar sync is enabled for an account
+- **THEN** the application SHALL import calendar events into the local SQLite database
+- **AND** it SHALL sync a bounded window of approximately the last 3 months through the next 6 months
+- **AND** it SHALL store calendar data locally for viewing and LLM context.
+
+#### Scenario: Sync Exchange calendar through EWS NTLM
+
+- **WHEN** an account is configured for Microsoft, Exchange, or Outlook calendar access
+- **AND** EWS NTLM access is available
+- **THEN** the application SHALL use EWS NTLM to read calendar events
+- **AND** it SHALL NOT require Microsoft Graph app registration for this path.
+
+#### Scenario: Preserve local-first calendar behavior
+
+- **WHEN** calendar events are synced
+- **THEN** the application SHALL treat calendar access as read-only
+- **AND** it SHALL NOT create, edit, delete, invite, or otherwise mutate remote calendar events.
+
+### Requirement: Calendar view
+
+The application SHALL provide a calendar modal for viewing locally synced events.
+
+#### Scenario: Show week calendar
+
+- **WHEN** the user opens the calendar view
+- **THEN** the application SHALL show a week-based calendar layout
+- **AND** it SHALL fit all seven days inside the modal without requiring horizontal scrolling.
+
+#### Scenario: Show all-day events
+
+- **WHEN** events span a whole day or multiple days
+- **THEN** the application SHALL render them in a dedicated all-day row
+- **AND** it SHALL NOT allow all-day entries to break alignment of the day headers or timed grid.
+
+#### Scenario: Show overlapping events
+
+- **WHEN** multiple timed events overlap
+- **THEN** the application SHALL place them side by side within the relevant day column
+- **AND** it SHALL keep each event visually associated with its time range.
+
+#### Scenario: Prioritize event titles
+
+- **WHEN** events are shown in the calendar grid
+- **THEN** each event SHALL prioritize the title as the first visible content
+- **AND** compact or overlapping events MAY hide time details until hover
+- **AND** hovering an event SHALL expand it downward to reveal additional content.
+
+#### Scenario: Select calendar event
+
+- **WHEN** the user clicks a calendar event
+- **THEN** the application SHALL update the detail area
+- **AND** it SHALL highlight the selected event colorwise
+- **AND** it SHALL NOT keep the event expanded after the pointer leaves.
+
+#### Scenario: Show selected event details
+
+- **WHEN** an event is selected
+- **THEN** the calendar modal SHALL show a structured detail view at the bottom of the modal
+- **AND** the detail view SHALL include title, time, date, account, free/busy state, location, and description where available.
+
+#### Scenario: Highlight today
+
+- **WHEN** the current week contains the current day
+- **THEN** the calendar view SHALL subtly highlight the current day column across header, all-day row, and timed grid.
+
+### Requirement: Calendar context for LLM responses
+
+The application SHALL make locally stored calendar information available to LLM-assisted drafting and chat when relevant.
+
+#### Scenario: Ask calendar-aware questions
+
+- **WHEN** the user asks about availability, meeting slots, scheduling, or related calendar topics
+- **THEN** the application SHALL include relevant locally synced calendar context in the LLM prompt
+- **AND** it SHALL use the calendar data to support answers such as next available meeting slots.
+
+#### Scenario: Calendar context remains local
+
+- **WHEN** calendar context is used for LLM generation
+- **THEN** the application SHALL only use locally synced calendar records
+- **AND** it SHALL NOT mutate or publish calendar data.
 
 ### Requirement: Email preview and local finishing
 
@@ -441,6 +539,17 @@ The application SHALL expose LLM and application activity logs from settings.
 - **WHEN** new log entries appear
 - **THEN** the logs view SHALL mark them unread
 - **AND** it SHALL provide a mark-all-as-read action.
+
+#### Scenario: Show token estimates per log entry
+
+- **WHEN** log entries represent LLM calls
+- **THEN** the logs view SHALL show estimated input, output, and total token counts for each entry where available.
+
+#### Scenario: Summarize recent token usage
+
+- **WHEN** the user opens the logs view
+- **THEN** the application SHALL summarize estimated LLM usage for the last 24 hours and the last 7 days
+- **AND** it SHALL show entry count, input tokens, output tokens, and total tokens for those windows where available.
 
 #### Scenario: Refresh logs
 

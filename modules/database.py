@@ -189,27 +189,33 @@ def save_email(data):
     conn.close()
 
 
-def get_emails(folder="INBOX", limit=60, offset=0, account_id=None):
+def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search=""):
     conn = get_connection()
+    search = (search or "").strip()
+    where = ["folder = ?"]
+    params = [folder]
     if account_id:
-        rows = conn.execute(
-            """SELECT id, folder, subject, sender, recipients, date, message_id, account_id
-               FROM emails WHERE folder = ? AND account_id = ?
-               ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
-               LIMIT ? OFFSET ?""",
-            (folder, account_id, limit, offset),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT id, folder, subject, sender, recipients, date, message_id, account_id
-               FROM emails WHERE folder = ?
-               ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
-               LIMIT ? OFFSET ?""",
-            (folder, limit, offset),
-        ).fetchall()
+        where.append("account_id = ?")
+        params.append(account_id)
+    if search:
+        like = f"%{search}%"
+        where.append(
+            """(
+                subject LIKE ? COLLATE NOCASE OR
+                sender LIKE ? COLLATE NOCASE OR
+                recipients LIKE ? COLLATE NOCASE OR
+                body_text LIKE ? COLLATE NOCASE
+            )"""
+        )
+        params.extend([like, like, like, like])
+    params.extend([limit, offset])
+    sql = f"""SELECT id, folder, subject, sender, recipients, date, message_id, account_id
+              FROM emails WHERE {' AND '.join(where)}
+              ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
+              LIMIT ? OFFSET ?"""
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
-
 
 def get_email_by_id(email_id):
     conn = get_connection()
