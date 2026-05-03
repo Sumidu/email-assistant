@@ -69,7 +69,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Email Assistant.app',
-    icon=None,              # set to 'assets/icon.icns' if you have one
+    icon='assets/icon.icns',
     bundle_identifier='com.emailassistant.app',
     info_plist={
         'NSPrincipalClass': 'NSApplication',

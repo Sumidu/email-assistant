@@ -268,11 +268,19 @@ The application SHALL help the user find actionable todos in locally stored emai
 - **WHEN** the user opens the todo finder
 - **THEN** the default date range SHALL cover the previous 7 days through today
 - **AND** the window SHALL live-count matching local emails for the selected account, folder, date range, and search filter without requiring a separate filter click
-- **AND** the user MAY press Filter to refresh the count explicitly after editing the filter.
+- **AND** changing the filter fields SHALL refresh the count automatically.
+
+#### Scenario: Find todos for a single email
+
+- **WHEN** the user opens an email
+- **THEN** the email detail actions SHALL include a todo action labeled `Find Todos`
+- **AND** the action SHALL open the todo finder scoped to exactly that email
+- **AND** the date and search filters SHALL be disabled while the finder is scoped to that email
+- **AND** the application SHALL start the LLM todo scan directly for that single email without an additional confirmation dialog.
 
 #### Scenario: Confirm LLM todo scanning
 
-- **WHEN** the user starts todo extraction for the current filtered email set
+- **WHEN** the user starts todo extraction for a multi-email filtered set
 - **THEN** the application SHALL show a confirmation dialog
 - **AND** the confirmation SHALL warn how many local emails will be individually sent to the selected LLM for scanning.
 
@@ -288,6 +296,12 @@ The application SHALL help the user find actionable todos in locally stored emai
 - **WHEN** todo extraction is running
 - **THEN** the todo finder SHALL show a progress bar, numeric progress such as `10 / 241`, and a preview of the current email being processed.
 
+#### Scenario: Verify a todo candidate against its source email
+
+- **WHEN** todo candidates are displayed
+- **THEN** selecting or focusing a candidate SHALL show the source email in the todo finder preview pane where available
+- **AND** it SHALL highlight the active candidate.
+
 #### Scenario: Parse todo output safely
 
 - **WHEN** an LLM response contains reasoning, prose, Markdown fences, or malformed non-JSON text
@@ -298,13 +312,16 @@ The application SHALL help the user find actionable todos in locally stored emai
 
 - **WHEN** todo candidates are displayed
 - **THEN** each todo SHALL include editable fields for title, due date, description, tags, and location.
+- **AND** the due date field SHALL use a date picker
+- **AND** it SHALL allow an empty date.
 
 #### Scenario: Export todos to a reminder system
 
 - **WHEN** the user selects todo candidates to use
 - **THEN** the application SHALL allow exporting the selected todos as a VTODO/iCalendar file for compatible reminder or calendar clients
 - **AND** it SHALL allow creating tasks in a selected Exchange account through EWS when EWS NTLM is configured
-- **AND** it SHALL ask for explicit confirmation before writing tasks to the remote Exchange account.
+- **AND** it SHALL ask for explicit confirmation before writing tasks to the remote Exchange account
+- **AND** after successful Exchange task creation it SHALL show a success message with a clear close action.
 
 ### Requirement: Email triage motivation
 
@@ -643,6 +660,19 @@ The application SHALL maintain a modern macOS-compatible visual style with suffi
 
 - **WHEN** UI elements relate to the knowledge base
 - **THEN** they SHALL use the knowledge base accent color consistently, including KB badges, Knowledge buttons, View KB buttons, and Update Knowledge Base controls.
+- **AND** email-level knowledge generation actions SHALL use the same knowledge base accent and symbol.
+
+#### Scenario: Todo accent color
+
+- **WHEN** UI elements relate to todo discovery, todo conversion, or Exchange task creation
+- **THEN** they SHALL use a dedicated todo accent color distinct from knowledge base orange, confirmation blue, finish green, and error red
+- **AND** todo actions SHALL use a todo symbol where compact labeling benefits from visual recognition
+- **AND** the todo extraction progress bar SHALL use the todo accent color.
+
+#### Scenario: Finished action color
+
+- **WHEN** an action marks an email finished or done
+- **THEN** it SHALL use the finishing accent color.
 
 #### Scenario: Primary generation action
 
