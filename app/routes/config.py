@@ -1,10 +1,13 @@
 import json
+import re
+from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 import requests
 
 from app import config_store
 from app import llm_providers
+from app import paths
 from app import prompt_defaults
 from app import quick_templates
 from app import runtime as rt
@@ -77,6 +80,36 @@ def save_config():
 @bp.route("/config/portable", methods=["GET"])
 def get_portable_config():
     return jsonify(config_store.portable_config(rt.config))
+
+
+@bp.route("/config/portable/save_icloud", methods=["POST"])
+def save_portable_config_to_icloud():
+    data = request.json or {}
+    envelope = data.get("encrypted_config")
+    if not isinstance(envelope, dict):
+        return jsonify({"error": "Missing encrypted config"}), 400
+    if envelope.get("kind") != "email-assistant-encrypted-portable-config":
+        return jsonify({"error": "Unexpected encrypted config format"}), 400
+
+    requested_name = str(data.get("filename") or "").strip()
+    if requested_name:
+        filename = re.sub(r"[^A-Za-z0-9._-]+", "_", requested_name)
+    else:
+        stamp = datetime.now().strftime("%Y-%m-%d")
+        filename = f"email-assistant-config-{stamp}.encrypted.json"
+    if not filename.endswith(".json"):
+        filename += ".json"
+
+    paths.ensure_app_dirs()
+    target = paths.PORTABLE_CONFIG_DIR / filename
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(envelope, f, indent=2)
+    return jsonify({
+        "success": True,
+        "path": str(target),
+        "filename": filename,
+        "icloud": paths.ICLOUD_DRIVE_DIR.exists(),
+    })
 
 
 @bp.route("/config/portable/import", methods=["POST"])

@@ -1427,16 +1427,26 @@ document.getElementById("btn-export-portable-config").addEventListener("click",a
   try{
     const cfg=await fetch("/api/config/portable").then(r=>r.json());
     const encrypted=await encryptPortableConfig(cfg,password);
+    const stamp=new Date().toISOString().slice(0,10);
+    const filename=`email-assistant-config-${stamp}.encrypted.json`;
+    const res=await fetch("/api/config/portable/save_icloud",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({filename,encrypted_config:encrypted}),
+    }).then(r=>r.json());
+    if(res.success){
+      setStatus(`Encrypted config saved to ${res.icloud?"iCloud":"local app folder"}: ${res.filename}`,"ok");
+      return;
+    }
     const blob=new Blob([JSON.stringify(encrypted,null,2)],{type:"application/json"});
     const a=document.createElement("a");
-    const stamp=new Date().toISOString().slice(0,10);
     a.href=URL.createObjectURL(blob);
-    a.download=`email-assistant-config-${stamp}.encrypted.json`;
+    a.download=filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    setStatus("Encrypted portable config exported","ok");
+    setStatus("iCloud save failed; downloaded encrypted config instead","err");
   }catch(err){setStatus("Portable config export failed: "+err.message,"err");}
 });
 

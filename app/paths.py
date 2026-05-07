@@ -14,6 +14,11 @@ CACHE_DIR = HOME / "Library" / "Caches" / APP_NAME
 
 ICLOUD_DRIVE_DIR = HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
 CLOUD_APP_DIR = ICLOUD_DRIVE_DIR / APP_NAME
+PORTABLE_CONFIG_DIR = (
+    CLOUD_APP_DIR / "Config"
+    if ICLOUD_DRIVE_DIR.exists()
+    else APP_SUPPORT_DIR / "Portable Config"
+)
 DEFAULT_KNOWLEDGE_DIR = (
     CLOUD_APP_DIR / "Knowledge"
     if ICLOUD_DRIVE_DIR.exists()
@@ -27,7 +32,7 @@ KNOWLEDGE_DIR = DEFAULT_KNOWLEDGE_DIR
 
 
 def ensure_app_dirs() -> None:
-    for path in (APP_SUPPORT_DIR, LOG_DIR, CACHE_DIR, KNOWLEDGE_DIR):
+    for path in (APP_SUPPORT_DIR, LOG_DIR, CACHE_DIR, KNOWLEDGE_DIR, PORTABLE_CONFIG_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -74,4 +79,3 @@ def migrate_legacy_data() -> list[dict]:
     _copy_file_if_missing(LEGACY_DIR / "llm_requests.log", LLM_LOG_PATH, "LLM log", migrated)
     _merge_dir_if_present(LEGACY_DIR / "knowledge", KNOWLEDGE_DIR, "knowledge base", migrated)
     return migrated
-

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='portable-config-20260508') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='icloud-config-20260508') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -351,11 +351,11 @@
         <div class="portable-config-box">
           <div>
             <strong>Portable encrypted config</strong>
-            <span>Exports accounts, server settings, LLM definitions, prompts, and templates without passwords, API keys, or private calendar URLs.</span>
+            <span>Exports accounts, server settings, LLM definitions, prompts, and templates without passwords, API keys, or private calendar URLs. The encrypted file is saved to iCloud Drive when available.</span>
           </div>
           <div class="portable-config-actions">
             <input id="cfg-portable-password" type="password" placeholder="Export/import password" autocomplete="new-password"/>
-            <button class="sbtn" id="btn-export-portable-config" type="button">Export encrypted</button>
+            <button class="sbtn" id="btn-export-portable-config" type="button">Save to iCloud</button>
             <button class="sbtn" id="btn-import-portable-config" type="button">Import encrypted</button>
             <input id="portable-config-file" type="file" accept=".json,application/json" hidden/>
           </div>
@@ -482,6 +482,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='portable-config-20260508') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='icloud-config-20260508') }}"></script>
 </body>
 </html>
