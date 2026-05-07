@@ -67,7 +67,7 @@ A self-contained `.app` bundle is available for macOS. It opens in its own nativ
 ./build_app.sh
 
 # The app appears in dist/EmailAssistant.app
-# Config and data are stored in ~/email_assistant/ — they survive app updates.
+# Config and local data are stored in ~/Library/Application Support/Email Assistant/.
 ```
 
 Keyboard shortcuts in the app window:
@@ -100,7 +100,7 @@ open http://localhost:5100
 
 ## Configuration
 
-Config is stored at `~/email_assistant/config.json` — **outside the repo**, so it survives updates and rebuilds. On first run a default file is created automatically.
+Config is stored at `~/Library/Application Support/Email Assistant/config.json` — **outside the repo**, so it survives updates and rebuilds. On first run a default file is created automatically and legacy data from `~/email_assistant` is copied into the new macOS locations.
 
 Open **Settings (⚙)** in the UI to configure accounts and one or more AI providers without editing JSON manually.
 
@@ -144,11 +144,11 @@ IMAP passwords and API keys are stored in the **macOS Keychain** (service `com.e
 IMAP server
     │
     ▼
-[SYNC] ──► SQLite DB (~/email_assistant/emails.db)
+[SYNC] ──► SQLite DB (~/Library/Application Support/Email Assistant/emails.db)
                 │
                 ▼
 [BUILD KNOWLEDGE] ──► LLM analyses sent mail + inbox
-                       ──► ~/email_assistant/knowledge/
+                       ──► iCloud Drive/Email Assistant/Knowledge/
                            _writing_style.md      (your writing style, auto)
                            contact@example.com.md (per-sender profile, auto)
                            about_me.md            (manual — pin to always include)
@@ -160,6 +160,10 @@ IMAP server
 ```
 
 Knowledge generation is **incremental** — only emails added since the last build are processed.
+
+### Knowledge Base
+
+Knowledge files are standard Markdown with Obsidian-compatible YAML frontmatter. Email Assistant stores metadata such as contact email, aliases, wildcard match patterns, generating LLM, timestamp, and tags directly in the `.md` file, while keeping the existing sidecar metadata as an internal index. The app hides frontmatter in its own viewer/editor content and reads it back when files are edited in Obsidian.
 
 ---
 
@@ -188,7 +192,7 @@ Knowledge generation is **incremental** — only emails added since the last bui
 
 ## Privacy
 
-- All email data stays on your machine (`~/email_assistant/`).
+- All email data stays on your machine (`~/Library/Application Support/Email Assistant/`).
 - Secrets (passwords, API keys) are stored in the macOS Keychain — never on disk in plain text.
 - The SQLite database and knowledge files live outside the repo and are git-ignored.
 - When using a remote LLM API (OpenAI, etc.), email snippets are sent to that API — use a local provider (LM Studio, Ollama) for full privacy.

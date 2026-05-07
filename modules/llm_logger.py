@@ -1,12 +1,14 @@
 """
 LLM request/response logger.
-Writes all LLM calls to ~/email_assistant/llm_requests.log for debugging.
+Writes all LLM calls to the app log directory for debugging.
 """
 
 import os
 from datetime import datetime
 
-LOG_PATH = os.path.expanduser("~/email_assistant/llm_requests.log")
+from app import paths
+
+LOG_PATH = str(paths.LLM_LOG_PATH)
 
 
 def log(kind: str, system: str, user: str, response: str, model: str = ""):

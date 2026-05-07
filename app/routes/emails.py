@@ -64,4 +64,4 @@ def mark_email_spam(email_id):
 
 @bp.route("/stats/today")
 def today_stats():
-    return jsonify({"finished_today": database.get_finished_today_count()})
+    return jsonify(database.get_processed_today_count())

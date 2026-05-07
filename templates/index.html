@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='spam-action-20260507') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='portable-config-20260508') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -88,11 +88,11 @@
   </main>
 
   <footer id="statusbar">
-    <div class="sb-seg"><div class="sb-dot" id="status-dot"></div><span id="status-msg">Ready</span></div>
+    <div class="sb-seg" id="status-msg-seg"><div class="sb-dot" id="status-dot"></div><span id="status-msg" title="Ready">Ready</span></div>
     <span class="sb-sep">|</span>
-    <div class="sb-seg success-counter" id="finished-today-seg"><span id="finished-today-count">0 finished today</span></div>
+    <div class="sb-seg success-counter" id="finished-today-seg"><span id="finished-today-count">0 processed today</span></div>
     <span class="sb-sep">|</span>
-    <div class="sb-seg" id="llm-picker-seg" style="margin-left:auto;">
+    <div class="sb-seg" id="llm-picker-seg">
       <span id="status-model" style="color:var(--dim);">LLM</span>
       <span class="llm-health-dot unknown" id="active-llm-health"></span>
       <select id="active-llm-select" title="Active LLM provider"></select>
@@ -104,7 +104,7 @@
 <div id="progress-drawer">
   <div id="progress-drawer-header">
     <span class="pd-title">&#9670; Task Progress</span>
-    <button id="pd-minimize" title="Minimize progress">_</button>
+    <button id="pd-minimize" title="Minimize progress" aria-label="Minimize progress">&minus;</button>
     <button id="pd-close">&#215;</button>
   </div>
   <div id="pd-bar-wrap"><div id="pd-bar"></div></div>
@@ -348,6 +348,18 @@
         <div class="prompt-actions">
           <button class="sbtn" id="btn-reset-prompts" type="button">Reset to default</button>
         </div>
+        <div class="portable-config-box">
+          <div>
+            <strong>Portable encrypted config</strong>
+            <span>Exports accounts, server settings, LLM definitions, prompts, and templates without passwords, API keys, or private calendar URLs.</span>
+          </div>
+          <div class="portable-config-actions">
+            <input id="cfg-portable-password" type="password" placeholder="Export/import password" autocomplete="new-password"/>
+            <button class="sbtn" id="btn-export-portable-config" type="button">Export encrypted</button>
+            <button class="sbtn" id="btn-import-portable-config" type="button">Import encrypted</button>
+            <input id="portable-config-file" type="file" accept=".json,application/json" hidden/>
+          </div>
+        </div>
         <div class="field-group prompt-field">
           <label>Email response system prompt</label>
           <textarea id="cfg-prompt-response" spellcheck="false"></textarea>
@@ -470,6 +482,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='spam-action-20260507') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='portable-config-20260508') }}"></script>
 </body>
 </html>

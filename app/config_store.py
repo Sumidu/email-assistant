@@ -7,12 +7,13 @@ import sys
 
 from modules import keychain_store
 from app import llm_providers
+from app import paths
 from app import prompt_defaults
 from app import quick_templates
 
 
-DATA_DIR = os.path.expanduser("~/email_assistant")
-CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+DATA_DIR = str(paths.APP_SUPPORT_DIR)
+CONFIG_PATH = str(paths.CONFIG_PATH)
 
 DEFAULT_CONFIG = {
     "accounts": [],
@@ -27,6 +28,30 @@ DEFAULT_CONFIG = {
     "prompts": prompt_defaults.prompt_defaults(),
     "quick_templates": quick_templates.quick_template_defaults(),
 }
+
+PORTABLE_CONFIG_VERSION = 1
+PORTABLE_ACCOUNT_IMAP_KEYS = {
+    "server",
+    "port",
+    "username",
+    "inbox_folder",
+    "sent_folder",
+    "spam_folder",
+    "provider_override",
+    "calendar_enabled",
+    "calendar_method",
+    "ews_url",
+    "graph_client_id",
+    "graph_tenant_id",
+    "fetch_limit",
+    "sync_mode",
+    "sync_since",
+    "auto_sync",
+    "sync_interval_minutes",
+    "body_storage",
+    "sync_folders",
+}
+PORTABLE_LLM_KEYS = {"id", "name", "base_url", "model"}
 
 
 def detect_imap_provider(imap: dict) -> dict:
@@ -77,8 +102,10 @@ def apply_account_detection(account: dict) -> dict:
 
 
 def migrate_config_location(base_dir: str) -> None:
-    """Move config.json from old location beside the binary to ~/email_assistant/."""
-    os.makedirs(DATA_DIR, exist_ok=True)
+    """Move config.json from old locations into Application Support."""
+    paths.ensure_app_dirs()
+    for item in paths.migrate_legacy_data():
+        print(f"[storage] Migrated {item['label']} from {item['from']} → {item['to']}")
     if os.path.exists(CONFIG_PATH):
         return
 
@@ -109,6 +136,103 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(keychain_store.strip_secrets(config), f, indent=2)
+
+
+def portable_config(config: dict) -> dict:
+    """Return a sync/import friendly config snapshot with secrets removed."""
+    accounts = []
+    for account in config.get("accounts", []):
+        imap = account.get("imap", {})
+        safe_imap = {
+            key: copy.deepcopy(imap[key])
+            for key in PORTABLE_ACCOUNT_IMAP_KEYS
+            if key in imap
+        }
+        accounts.append({
+            "id": account.get("id", ""),
+            "name": account.get("name", ""),
+            "imap": safe_imap,
+        })
+
+    llms = []
+    for provider in config.get("llms", []):
+        llms.append({
+            key: copy.deepcopy(provider[key])
+            for key in PORTABLE_LLM_KEYS
+            if key in provider
+        })
+
+    app_config = {
+        "port": config.get("app", {}).get("port", 5100),
+        "active_llm_id": config.get("app", {}).get("active_llm_id", config.get("default_llm_id", "")),
+    }
+    return {
+        "kind": "email-assistant-portable-config",
+        "version": PORTABLE_CONFIG_VERSION,
+        "accounts": accounts,
+        "llms": llms,
+        "default_llm_id": config.get("default_llm_id", ""),
+        "app": app_config,
+        "prompts": copy.deepcopy(config.get("prompts", {})),
+        "quick_templates": copy.deepcopy(config.get("quick_templates", [])),
+    }
+
+
+def apply_portable_config(current: dict, incoming: dict) -> dict:
+    if incoming.get("kind") != "email-assistant-portable-config":
+        raise ValueError("Not an Email Assistant portable config.")
+
+    imported = copy.deepcopy(current)
+
+    existing_accounts = {a.get("id"): a for a in current.get("accounts", [])}
+    accounts = []
+    for account in incoming.get("accounts", []) or []:
+        account_id = str(account.get("id") or make_account_id(account.get("name") or "account", [a.get("id") for a in accounts]))
+        old_imap = existing_accounts.get(account_id, {}).get("imap", {})
+        safe_imap = {
+            key: copy.deepcopy(account.get("imap", {}).get(key))
+            for key in PORTABLE_ACCOUNT_IMAP_KEYS
+            if key in account.get("imap", {})
+        }
+        if old_imap.get("password"):
+            safe_imap["password"] = old_imap["password"]
+        if old_imap.get("calendar_url"):
+            safe_imap["calendar_url"] = old_imap["calendar_url"]
+        accounts.append({
+            "id": account_id,
+            "name": account.get("name") or account_id,
+            "imap": safe_imap,
+        })
+    imported["accounts"] = accounts
+
+    existing_llms = {p.get("id"): p for p in current.get("llms", [])}
+    llms = []
+    for provider in incoming.get("llms", []) or []:
+        safe_provider = {
+            key: copy.deepcopy(provider.get(key))
+            for key in PORTABLE_LLM_KEYS
+            if key in provider
+        }
+        provider_id = safe_provider.get("id")
+        if provider_id and existing_llms.get(provider_id, {}).get("api_key"):
+            safe_provider["api_key"] = existing_llms[provider_id]["api_key"]
+        llms.append(safe_provider)
+    if llms:
+        imported["llms"] = llms
+
+    if "default_llm_id" in incoming:
+        imported["default_llm_id"] = incoming.get("default_llm_id") or ""
+    if "app" in incoming:
+        app_config = imported.setdefault("app", {})
+        for key in ("port", "active_llm_id"):
+            if key in incoming["app"]:
+                app_config[key] = incoming["app"][key]
+    if "prompts" in incoming:
+        imported["prompts"] = incoming.get("prompts") or {}
+    if "quick_templates" in incoming:
+        imported["quick_templates"] = incoming.get("quick_templates") or []
+
+    return migrate_config(imported)
 
 
 def migrate_config(config: dict) -> dict:

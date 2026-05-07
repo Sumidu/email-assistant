@@ -3,6 +3,7 @@ import json
 from flask import Blueprint, jsonify, request
 import requests
 
+from app import config_store
 from app import llm_providers
 from app import prompt_defaults
 from app import quick_templates
@@ -71,6 +72,25 @@ def save_config():
     rt.save_config()
     rt.reload_modules()
     return jsonify({"success": True})
+
+
+@bp.route("/config/portable", methods=["GET"])
+def get_portable_config():
+    return jsonify(config_store.portable_config(rt.config))
+
+
+@bp.route("/config/portable/import", methods=["POST"])
+def import_portable_config():
+    data = request.json
+    if not data:
+        return jsonify({"error": "No config data"}), 400
+    try:
+        rt.config = config_store.apply_portable_config(rt.config, data)
+        rt.save_config()
+        rt.reload_modules()
+        return jsonify({"success": True})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @bp.route("/prompt_defaults", methods=["GET"])

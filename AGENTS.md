@@ -26,8 +26,8 @@ No test suite. No linter configured.
 Flask app (`main.py`) with four modules and a SQLite backend.
 
 **Data flow:**
-1. `IMAPFetcher.sync()` → pulls INBOX + Sent via IMAP → `database.save_email()` → `~/email_assistant/emails.db`
-2. `KnowledgeBuilder.build()` → reads all emails from DB → calls LM Studio → writes markdown files to `~/email_assistant/knowledge/`
+1. `IMAPFetcher.sync()` → pulls INBOX + Sent via IMAP → `database.save_email()` → `~/Library/Application Support/Email Assistant/emails.db`
+2. `KnowledgeBuilder.build()` → reads all emails from DB → calls LM Studio → writes markdown files to the Knowledge directory (iCloud Drive when available, otherwise Application Support)
    - `_writing_style.md` — style guide from sent mail
    - `<email@addr>.md` — per-contact profile (top 40 senders)
 3. `ResponseGenerator.generate_response()` → loads matching knowledge files → calls LM Studio → returns draft text
@@ -41,7 +41,7 @@ Flask app (`main.py`) with four modules and a SQLite backend.
 
 ## Config
 
-Config is stored at `~/email_assistant/config.json` (survives app rebuilds).
+Config is stored at `~/Library/Application Support/Email Assistant/config.json` (survives app rebuilds).
 On first run it is auto-migrated from any old location beside the binary.
 Key fields:
 - `imap.sent_folder`: `"Sent Items"` for Outlook, `"Sent"` for Gmail
@@ -51,5 +51,8 @@ Key fields:
 
 | Path | Contents |
 |------|----------|
-| `~/email_assistant/emails.db` | SQLite — all fetched emails |
-| `~/email_assistant/knowledge/` | Generated markdown knowledge files |
+| `~/Library/Application Support/Email Assistant/emails.db` | SQLite — all fetched emails |
+| `~/Library/Application Support/Email Assistant/config.json` | Non-secret config |
+| `~/Library/Logs/Email Assistant/llm_requests.log` | LLM request log |
+| `~/Library/Mobile Documents/com~apple~CloudDocs/Email Assistant/Knowledge/` | Generated markdown knowledge files when iCloud Drive is available |
+| `~/Library/Application Support/Email Assistant/Knowledge/` | Knowledge fallback when iCloud Drive is unavailable |

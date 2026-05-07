@@ -21,10 +21,11 @@ The application SHALL provide a browser-based UI served by the local Flask appli
 #### Scenario: Preserve runtime data outside the project checkout
 
 - **WHEN** the application reads or writes persistent user data
-- **THEN** it SHALL use the user data directory `~/email_assistant`
-- **AND** it SHALL keep configuration in `~/email_assistant/config.json`
-- **AND** it SHALL keep synced email data in `~/email_assistant/emails.db`
-- **AND** it SHALL keep generated knowledge base Markdown files in `~/email_assistant/knowledge/`.
+- **THEN** it SHALL keep local app data in `~/Library/Application Support/Email Assistant`
+- **AND** it SHALL keep configuration in `~/Library/Application Support/Email Assistant/config.json`
+- **AND** it SHALL keep synced email data in `~/Library/Application Support/Email Assistant/emails.db`
+- **AND** it SHALL keep logs in `~/Library/Logs/Email Assistant`
+- **AND** it SHALL keep generated knowledge base Markdown files in `~/Library/Mobile Documents/com~apple~CloudDocs/Email Assistant/Knowledge/` when iCloud Drive is available, falling back to `~/Library/Application Support/Email Assistant/Knowledge/`.
 
 ### Requirement: IMAP account configuration
 
@@ -423,7 +424,7 @@ The application SHALL store knowledge base entries as Markdown files.
 #### Scenario: Store per-contact knowledge
 
 - **WHEN** the application generates knowledge for a contact
-- **THEN** it SHALL store the content as Markdown in `~/email_assistant/knowledge/`
+- **THEN** it SHALL store the content as Markdown in the configured Knowledge directory
 - **AND** it SHALL keep the content editable as Markdown.
 
 #### Scenario: Store writing style knowledge
@@ -435,6 +436,27 @@ The application SHALL store knowledge base entries as Markdown files.
 
 - **WHEN** a knowledge entry is created or updated
 - **THEN** the application SHALL record metadata such as the generating LLM, aliases, wildcard patterns, pin state, and timestamps where available.
+
+#### Scenario: Store Obsidian-compatible knowledge metadata
+
+- **WHEN** a knowledge entry is saved as Markdown
+- **THEN** the application SHALL include YAML frontmatter compatible with Obsidian properties
+- **AND** the frontmatter SHALL include stable metadata such as title, type, contact email, aliases, wildcard match patterns, source, generating LLM, timestamp, and tags where available
+- **AND** the application SHALL read aliases and wildcard match patterns back from frontmatter when files are edited outside the app.
+
+#### Scenario: Preserve Obsidian edits
+
+- **WHEN** a user edits a knowledge file in an external Markdown editor such as Obsidian
+- **THEN** the application SHALL preserve the Markdown body on subsequent saves
+- **AND** it SHALL avoid exposing YAML frontmatter as normal knowledge content in LLM prompts or in-app read mode.
+
+#### Scenario: Enrich contact references with Obsidian links
+
+- **WHEN** a knowledge entry is created, regenerated, renamed, merged, or manually saved
+- **THEN** the application SHALL rebuild its contact index from Markdown frontmatter and filenames
+- **AND** it SHALL add Obsidian wikilinks for strong mentions of known contacts in Markdown bodies
+- **AND** it SHALL avoid modifying YAML frontmatter, headings, code blocks, existing wiki links, or Markdown links
+- **AND** it SHALL skip ambiguous display names rather than link to the wrong contact.
 
 ### Requirement: Knowledge base viewing and editing
 
@@ -541,6 +563,7 @@ The application SHALL allow two knowledge entries to be merged into one canonica
 - **WHEN** the user merges two selected entries
 - **THEN** the application SHALL choose or ask for the surviving entry
 - **AND** it SHALL append or combine the Markdown knowledge from the removed entry into the surviving entry
+- **AND** it SHALL add an Obsidian wikilink reference to the removed entry name in the merged Markdown body
 - **AND** it SHALL add the removed entry identity as an alias of the surviving entry
 - **AND** it SHALL merge aliases, wildcard patterns, pinned state, and metadata where possible
 - **AND** it SHALL remove the redundant entry from the knowledge base list.

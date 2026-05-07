@@ -14,14 +14,16 @@ from datetime import datetime
 import requests
 
 from app import llm_providers
+from app import paths
 from app import prompt_defaults
 
 from . import database
 from . import llm_logger
 
-KNOWLEDGE_DIR = os.path.expanduser("~/email_assistant/knowledge")
+KNOWLEDGE_DIR = str(paths.KNOWLEDGE_DIR)
 PINS_PATH = os.path.join(KNOWLEDGE_DIR, "_pinned.json")
 METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
+FRONTMATTER_MARKER = "---"
 
 
 class KnowledgeBuilder:
@@ -29,6 +31,7 @@ class KnowledgeBuilder:
         self.config = config
         self._last_llm = None
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+        self.migrate_to_obsidian_format()
 
     # ---- LLM call ----------------------------------------------------------
 
@@ -72,13 +75,40 @@ class KnowledgeBuilder:
         }
 
     def _load_metadata(self) -> dict:
+        metadata = {}
         if not os.path.exists(METADATA_PATH):
-            return {}
-        try:
-            with open(METADATA_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+            metadata = {}
+        else:
+            try:
+                with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+            except Exception:
+                metadata = {}
+        return self._merge_frontmatter_metadata(metadata)
+
+    def _merge_frontmatter_metadata(self, metadata: dict) -> dict:
+        if not os.path.isdir(KNOWLEDGE_DIR):
+            return metadata
+        for fname in os.listdir(KNOWLEDGE_DIR):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    frontmatter, _ = self._split_frontmatter(f.read())
+            except Exception:
+                continue
+            if not frontmatter:
+                continue
+            meta = metadata.setdefault(fname, self._metadata_template(frontmatter.get("source") or "manual"))
+            for key in ("source", "llm_id", "llm_name", "model", "base_url", "generated_at"):
+                if frontmatter.get(key) and not meta.get(key):
+                    meta[key] = frontmatter[key]
+            for key in ("aliases", "match_patterns"):
+                values = frontmatter.get(key)
+                if isinstance(values, list) and values:
+                    meta[key] = self._unique_values(meta.get(key, []), values)
+        return metadata
 
     def _save_metadata(self, metadata: dict) -> None:
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
@@ -89,6 +119,397 @@ class KnowledgeBuilder:
         metadata = self._load_metadata()
         metadata[filename] = self._current_llm_metadata(source)
         self._save_metadata(metadata)
+        self._sync_file_frontmatter(filename, metadata[filename])
+
+    def migrate_to_obsidian_format(self) -> dict:
+        if not os.path.isdir(KNOWLEDGE_DIR):
+            return {"success": True, "updated": 0}
+        metadata = self._load_metadata()
+        updated = 0
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    old = f.read()
+                meta = metadata.setdefault(fname, self._metadata_template("manual"))
+                new = self._compose_markdown(fname, old, meta)
+                if new != old:
+                    with open(fpath, "w", encoding="utf-8") as f:
+                        f.write(new)
+                    updated += 1
+            except Exception:
+                continue
+        self._save_metadata(metadata)
+        return {"success": True, "updated": updated}
+
+    # ---- Obsidian links ----------------------------------------------------
+
+    @staticmethod
+    def _unwrap_wikilinks(value: str) -> str:
+        value = str(value or "")
+        value = re.sub(r"\[\[[^|\]#]+(?:#[^|\]]+)?\|([^\]]+)\]\]", r"\1", value)
+        value = re.sub(r"\[\[([^\]#|]+)(?:#[^\]]+)?\]\]", r"\1", value)
+        return value
+
+    @classmethod
+    def _unwrap_heading_wikilinks(cls, body: str) -> str:
+        def repl(match):
+            return match.group(1) + cls._unwrap_wikilinks(match.group(2))
+        return re.sub(r"^(#{1,6}\s+)(.+)$", repl, body or "", flags=re.MULTILINE)
+
+    @staticmethod
+    def _repair_nested_wikilinks(body: str) -> str:
+        body = body or ""
+        nested = re.compile(r"\[\[([^\]|#]+)(#[^\]|]+)?\|\[\[[^\]|#]+(?:#[^\]|]+)?\|([^\]]+)\]\]\]\]")
+        previous = None
+        while previous != body:
+            previous = body
+            body = nested.sub(r"[[\1|\3]]", body)
+        return body
+
+    @staticmethod
+    def _clean_link_label(value: str) -> str:
+        label = KnowledgeBuilder._unwrap_wikilinks(value).strip()
+        label = re.sub(r"^contact\s*:\s*", "", label, flags=re.IGNORECASE).strip()
+        if "," in label:
+            parts = [p.strip() for p in label.split(",", 1)]
+            if all(parts):
+                label = f"{parts[1]} {parts[0]}"
+        return re.sub(r"\s+", " ", label).strip()
+
+    @staticmethod
+    def _name_from_email(value: str) -> str:
+        email = str(value or "").strip().lower()
+        if "@" not in email:
+            return ""
+        local = email.split("@", 1)[0]
+        parts = [p for p in re.split(r"[._\-]+", local) if len(p) > 1]
+        if len(parts) < 2:
+            return ""
+        return " ".join(p.capitalize() for p in parts[:3])
+
+    @staticmethod
+    def _link_term_ok(term: str) -> bool:
+        term = str(term or "").strip()
+        if not term:
+            return False
+        if "@" in term:
+            return True
+        if len(term) < 6:
+            return False
+        if len(term.split()) < 2:
+            return False
+        return bool(re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]", term))
+
+    @staticmethod
+    def _unique_preserve_case(values) -> list[str]:
+        seen = set()
+        result = []
+        for value in values or []:
+            value = str(value or "").strip()
+            key = value.lower()
+            if value and key not in seen:
+                seen.add(key)
+                result.append(value)
+        return result
+
+    def _contact_link_index(self) -> list[dict]:
+        metadata = self._load_metadata()
+        raw_index = []
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if not fname.endswith(".md") or fname.startswith("_"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    frontmatter, body = self._split_frontmatter(f.read())
+            except Exception:
+                continue
+            meta = dict(frontmatter)
+            meta.update(metadata.get(fname, {}))
+            email = meta.get("email") or self._infer_email_from_filename(fname)
+            title = self._clean_link_label(meta.get("title") or self._frontmatter_title(fname, body))
+            aliases = meta.get("aliases") if isinstance(meta.get("aliases"), list) else []
+            terms = [title, email, self._name_from_email(email)]
+            terms.extend(aliases)
+            for alias in aliases:
+                terms.append(self._name_from_email(alias))
+            terms = [t for t in self._unique_preserve_case(terms) if self._link_term_ok(t)]
+            if not terms:
+                continue
+            raw_index.append({
+                "filename": fname,
+                "stem": fname.removesuffix(".md"),
+                "label": title or email or fname.removesuffix(".md"),
+                "terms": terms,
+            })
+        term_targets = {}
+        for item in raw_index:
+            for term in item["terms"]:
+                term_targets.setdefault(term.lower(), set()).add(item["stem"])
+        index = []
+        for item in raw_index:
+            filtered_terms = [
+                term for term in item["terms"]
+                if "@" in term or len(term_targets.get(term.lower(), set())) == 1
+            ]
+            if filtered_terms:
+                next_item = dict(item)
+                next_item["terms"] = filtered_terms
+                index.append(next_item)
+        index.sort(key=lambda item: max(len(t) for t in item["terms"]), reverse=True)
+        return index
+
+    def _ambiguous_link_labels(self) -> set[str]:
+        metadata = self._load_metadata()
+        labels = {}
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if not fname.endswith(".md") or fname.startswith("_"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    frontmatter, body = self._split_frontmatter(f.read())
+            except Exception:
+                continue
+            meta = dict(frontmatter)
+            meta.update(metadata.get(fname, {}))
+            title = self._clean_link_label(meta.get("title") or self._frontmatter_title(fname, body))
+            if title:
+                labels.setdefault(title.lower(), set()).add(fname.removesuffix(".md"))
+        return {label for label, targets in labels.items() if len(targets) > 1}
+
+    def _unlink_ambiguous_labels(self, body: str, ambiguous_labels: set[str]) -> str:
+        if not ambiguous_labels:
+            return body
+
+        def repl(match):
+            target = match.group(1)
+            label = match.group(2) or target
+            if label.strip().lower() in ambiguous_labels:
+                return label
+            return match.group(0)
+
+        return re.sub(r"\[\[([^|\]#]+)(?:#[^|\]]+)?(?:\|([^\]]+))?\]\]", repl, body or "")
+
+    @staticmethod
+    def _protect_markdown_segments(body: str):
+        protected = re.compile(r"(```[\s\S]*?```|^#{1,6}\s+.*$|\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]+\))", re.MULTILINE)
+        parts = []
+        last = 0
+        for match in protected.finditer(body):
+            if match.start() > last:
+                parts.append((False, body[last:match.start()]))
+            parts.append((True, match.group(0)))
+            last = match.end()
+        if last < len(body):
+            parts.append((False, body[last:]))
+        return parts
+
+    def _linkify_body(self, filename: str, body: str, index: list[dict]) -> str:
+        if not body.strip():
+            return body
+        own_stem = os.path.basename(filename).removesuffix(".md")
+        existing_links = {
+            link.split("|", 1)[0].split("#", 1)[0].strip()
+            for link in re.findall(r"\[\[([^\]]+)\]\]", body)
+        }
+        linked_targets = set(existing_links)
+        parts = self._protect_markdown_segments(body)
+
+        for contact in index:
+            stem = contact["stem"]
+            if stem == own_stem or stem in linked_targets:
+                continue
+            replacement_done = False
+            for term in sorted(contact["terms"], key=len, reverse=True):
+                escaped = re.escape(term)
+                pattern = re.compile(rf"(?<![\w@.\-])({escaped})(?![\w@.\-])", re.IGNORECASE)
+                for i, (is_protected, text) in enumerate(parts):
+                    if is_protected:
+                        continue
+                    if not pattern.search(text):
+                        continue
+
+                    def repl(match):
+                        label = match.group(1)
+                        if label.lower() == stem.lower():
+                            return f"[[{stem}]]"
+                        return f"[[{stem}|{label}]]"
+
+                    parts[i] = (False, pattern.sub(repl, text, count=1))
+                    linked_targets.add(stem)
+                    replacement_done = True
+                    break
+                if replacement_done:
+                    break
+        return "".join(text for _, text in parts)
+
+    def enrich_obsidian_links(self, filenames=None, update_all: bool = False) -> dict:
+        if not os.path.isdir(KNOWLEDGE_DIR):
+            return {"success": True, "updated": 0}
+        index = self._contact_link_index()
+        ambiguous_labels = self._ambiguous_link_labels()
+        if update_all or filenames is None:
+            targets = [f for f in os.listdir(KNOWLEDGE_DIR) if f.endswith(".md")]
+        else:
+            targets = [os.path.basename(f) for f in filenames if str(f or "").endswith(".md")]
+        metadata = self._load_metadata()
+        updated = []
+        for fname in sorted(set(targets)):
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            if not fname.endswith(".md") or not os.path.exists(fpath):
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    original = f.read()
+                _, body = self._split_frontmatter(original)
+                original_body = body
+                body = self._unlink_ambiguous_labels(body, ambiguous_labels)
+                linked_body = self._linkify_body(fname, body, index)
+                if linked_body == original_body:
+                    continue
+                meta = metadata.get(fname, self._metadata_template("manual"))
+                updated_content = self._compose_markdown(fname, linked_body, meta)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(updated_content)
+                updated.append(fname)
+            except Exception:
+                continue
+        return {"success": True, "updated": len(updated), "files": updated}
+
+    @staticmethod
+    def _yaml_quote(value) -> str:
+        text = str(value or "")
+        return json.dumps(text, ensure_ascii=False)
+
+    @classmethod
+    def _yaml_list(cls, values) -> str:
+        items = [cls._yaml_quote(v) for v in values or [] if str(v or "").strip()]
+        return "[" + ", ".join(items) + "]"
+
+    @staticmethod
+    def _parse_frontmatter_value(value: str):
+        value = value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                inner = value[1:-1].strip()
+                if not inner:
+                    return []
+                return [v.strip().strip("\"'") for v in inner.split(",") if v.strip()]
+        return value.strip("\"'")
+
+    @classmethod
+    def _split_frontmatter(cls, content: str) -> tuple[dict, str]:
+        if not content.startswith(FRONTMATTER_MARKER + "\n"):
+            return {}, content
+        end = content.find("\n" + FRONTMATTER_MARKER + "\n", len(FRONTMATTER_MARKER) + 1)
+        if end == -1:
+            return {}, content
+        raw = content[len(FRONTMATTER_MARKER) + 1:end]
+        body = content[end + len(FRONTMATTER_MARKER) + 2:]
+        data = {}
+        for line in raw.splitlines():
+            if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            data[key.strip()] = cls._parse_frontmatter_value(value)
+        return data, body.lstrip("\n")
+
+    @classmethod
+    def _strip_frontmatter(cls, content: str) -> str:
+        return cls._split_frontmatter(content)[1]
+
+    @staticmethod
+    def _frontmatter_title(filename: str, content: str = "") -> str:
+        stem = os.path.basename(filename).removesuffix(".md")
+        first_heading = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
+        if first_heading:
+            return first_heading.group(1).strip()
+        if stem == "_writing_style":
+            return "Writing Style"
+        return stem.replace("_", " ").replace(".", " ").title()
+
+    @staticmethod
+    def _infer_email_from_filename(filename: str) -> str:
+        stem = os.path.basename(filename).removesuffix(".md")
+        if stem.startswith("_") or "_" not in stem:
+            return ""
+        local, domain = stem.rsplit("_", 1)
+        if "." not in domain:
+            return ""
+        return f"{local}@{domain}".lower()
+
+    def _frontmatter_for_file(self, filename: str, metadata: dict, content: str) -> dict:
+        existing, body = self._split_frontmatter(content)
+        source = metadata.get("source") or existing.get("source") or "manual"
+        title = self._clean_link_label(existing.get("title") or self._frontmatter_title(filename, body))
+        email = existing.get("email") or self._infer_email_from_filename(filename)
+        aliases = self._normalize_aliases(metadata.get("aliases", existing.get("aliases", [])))
+        match_patterns = self._normalize_match_patterns(
+            metadata.get("match_patterns", existing.get("match_patterns", []))
+        )
+        tags = existing.get("tags") if isinstance(existing.get("tags"), list) else []
+        for tag in ("email-assistant", "knowledge-base"):
+            if tag not in tags:
+                tags.append(tag)
+        if source == "contact_profile" and "contact" not in tags:
+            tags.append("contact")
+        if filename == "_writing_style.md" and "writing-style" not in tags:
+            tags.append("writing-style")
+
+        frontmatter = {
+            "title": title,
+            "type": "writing_style" if filename == "_writing_style.md" else "contact" if source == "contact_profile" or email else "note",
+            "email": email,
+            "aliases": aliases,
+            "match_patterns": match_patterns,
+            "source": source,
+            "llm_id": metadata.get("llm_id", existing.get("llm_id", "")),
+            "llm_name": metadata.get("llm_name", existing.get("llm_name", "")),
+            "model": metadata.get("model", existing.get("model", "")),
+            "generated_at": metadata.get("generated_at", existing.get("generated_at", "")),
+            "tags": tags,
+        }
+        return frontmatter
+
+    def _render_frontmatter(self, frontmatter: dict) -> str:
+        lines = [FRONTMATTER_MARKER]
+        for key in ("title", "type", "email", "aliases", "match_patterns", "source", "llm_id", "llm_name", "model", "generated_at", "tags"):
+            value = frontmatter.get(key)
+            if key in ("aliases", "match_patterns", "tags"):
+                lines.append(f"{key}: {self._yaml_list(value)}")
+            elif value:
+                lines.append(f"{key}: {self._yaml_quote(value)}")
+        lines.append(FRONTMATTER_MARKER)
+        return "\n".join(lines) + "\n\n"
+
+    def _compose_markdown(self, filename: str, content: str, metadata: dict) -> str:
+        _, body = self._split_frontmatter(content)
+        body = self._repair_nested_wikilinks(body)
+        body = self._unwrap_heading_wikilinks(body)
+        frontmatter = self._frontmatter_for_file(filename, metadata, content)
+        return self._render_frontmatter(frontmatter) + body.lstrip("\n")
+
+    def _sync_file_frontmatter(self, filename: str, metadata: dict | None = None) -> None:
+        fname = os.path.basename(filename)
+        if not fname.endswith(".md"):
+            return
+        fpath = os.path.join(KNOWLEDGE_DIR, fname)
+        if not os.path.exists(fpath):
+            return
+        metadata = metadata or self._load_metadata().get(fname, self._metadata_template("manual"))
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read()
+        updated = self._compose_markdown(fname, content, metadata)
+        if updated != content:
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(updated)
 
     @staticmethod
     def _normalize_match_patterns(patterns) -> list[str]:
@@ -312,6 +733,7 @@ class KnowledgeBuilder:
     @staticmethod
     def _clean_generated_markdown(content: str) -> str:
         content = content or ""
+        content = KnowledgeBuilder._strip_reasoning_output(content)
         fence_re = re.compile(r"```(?:markdown|md)\s*\n([\s\S]*?)```", re.IGNORECASE)
         fences = list(fence_re.finditer(content))
         if len(fences) > 1:
@@ -326,6 +748,62 @@ class KnowledgeBuilder:
                 content = content[:first.start()] + first.group(1).strip() + "\n" + content[last.end():]
                 return content.strip()
         return fence_re.sub(lambda m: m.group(1).strip() + "\n", content).strip()
+
+    @staticmethod
+    def _strip_reasoning_output(content: str) -> str:
+        """Remove model reasoning blocks that should never enter the KB."""
+        content = content or ""
+        block_tags = ("think", "thinking", "reasoning", "analysis")
+        for tag in block_tags:
+            content = re.sub(
+                rf"<\s*{tag}\b[^>]*>[\s\S]*?<\s*/\s*{tag}\s*>",
+                "",
+                content,
+                flags=re.IGNORECASE,
+            )
+            content = re.sub(
+                rf"&lt;\s*{tag}\b[^&]*&gt;[\s\S]*?&lt;\s*/\s*{tag}\s*&gt;",
+                "",
+                content,
+                flags=re.IGNORECASE,
+            )
+        content = re.sub(
+            r"```(?:think|thinking|reasoning|analysis)\s*\n[\s\S]*?```",
+            "",
+            content,
+            flags=re.IGNORECASE,
+        )
+        content = re.sub(r"^\s*(?:thinking|reasoning|analysis)\s*:\s*[\s\S]*?(?=^\s{0,3}#|\Z)", "", content, flags=re.IGNORECASE | re.MULTILINE)
+        content = re.sub(r"<\s*/?\s*(?:think|thinking|reasoning|analysis)\b[^>]*>", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"&lt;\s*/?\s*(?:think|thinking|reasoning|analysis)\b[^&]*&gt;", "", content, flags=re.IGNORECASE)
+        return re.sub(r"\n{3,}", "\n\n", content).strip()
+
+    def clean_existing_reasoning_output(self) -> dict:
+        if not os.path.isdir(KNOWLEDGE_DIR):
+            return {"success": True, "updated": 0}
+        all_metadata = self._load_metadata()
+        updated = []
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    original = f.read()
+                frontmatter, body = self._split_frontmatter(original)
+                cleaned_body = self._strip_reasoning_output(body)
+                if frontmatter:
+                    metadata = all_metadata.get(fname, self._metadata_template("manual"))
+                    cleaned = self._compose_markdown(fname, cleaned_body, metadata)
+                else:
+                    cleaned = cleaned_body
+                if cleaned != original:
+                    with open(fpath, "w", encoding="utf-8") as f:
+                        f.write(cleaned)
+                    updated.append(fname)
+            except Exception:
+                continue
+        return {"success": True, "updated": len(updated), "files": updated}
 
     # ---- knowledge builders ------------------------------------------------
 
@@ -353,6 +831,7 @@ class KnowledgeBuilder:
                 f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M}*\n\n")
                 f.write(content)
             self._set_file_metadata("_writing_style.md", "writing_style")
+            self.enrich_obsidian_links(["_writing_style.md"])
             return {"success": True, "file": path}
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -391,6 +870,7 @@ class KnowledgeBuilder:
             content = self._clean_generated_markdown(self._call_llm(system, user, max_tokens=1200))
             fname = self._safe_filename(addr) + ".md"
             path  = os.path.join(KNOWLEDGE_DIR, fname)
+            existed = os.path.exists(path)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"# Contact: {data.get('name', addr)}\n\n")
                 f.write(f"**Email:** {addr}  \n")
@@ -398,6 +878,7 @@ class KnowledgeBuilder:
                 f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M}*\n\n")
                 f.write(content)
             self._set_file_metadata(fname, "contact_profile")
+            self.enrich_obsidian_links([fname], update_all=not existed)
             return {"success": True, "contact": addr, "file": path}
         except Exception as exc:
             return {"success": False, "contact": addr, "error": str(exc)}
@@ -499,6 +980,11 @@ class KnowledgeBuilder:
                 )
             contact_results.append(self.build_contact_knowledge(addr, data))
 
+        if contact_results:
+            if progress_callback:
+                progress_callback("Updating Obsidian links between knowledge entries…")
+            self.enrich_obsidian_links(update_all=True)
+
         database.mark_emails_kb_processed(processed_ids)
 
         return {
@@ -537,14 +1023,14 @@ class KnowledgeBuilder:
             fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))
             if os.path.exists(fpath) and fpath not in loaded_paths:
                 with open(fpath, "r", encoding="utf-8") as f:
-                    knowledge.append((fname.replace(".md", "").replace("_", " ").title(), f.read()))
+                    knowledge.append((fname.replace(".md", "").replace("_", " ").title(), self._strip_frontmatter(f.read())))
                 loaded_paths.add(fpath)
 
         # Writing style (unless already pinned)
         style_path = os.path.join(KNOWLEDGE_DIR, "_writing_style.md")
         if os.path.exists(style_path) and style_path not in loaded_paths:
             with open(style_path, "r", encoding="utf-8") as f:
-                knowledge.append(("My Writing Style", f.read()))
+                knowledge.append(("My Writing Style", self._strip_frontmatter(f.read())))
             loaded_paths.add(style_path)
 
         # Contact profile
@@ -553,7 +1039,7 @@ class KnowledgeBuilder:
         )
         if os.path.exists(contact_path) and contact_path not in loaded_paths:
             with open(contact_path, "r", encoding="utf-8") as f:
-                knowledge.append(("Contact Profile", f.read()))
+                knowledge.append(("Contact Profile", self._strip_frontmatter(f.read())))
             loaded_paths.add(contact_path)
 
         for fname, match_type in self._metadata_files_for_address(sender_email):
@@ -562,7 +1048,7 @@ class KnowledgeBuilder:
                 with open(fpath, "r", encoding="utf-8") as f:
                     label = fname.replace(".md", "").replace("_", " ").title()
                     prefix = "Alias" if match_type == "alias" else "Wildcard"
-                    knowledge.append((f"{prefix}: {label}", f.read()))
+                    knowledge.append((f"{prefix}: {label}", self._strip_frontmatter(f.read())))
                 loaded_paths.add(fpath)
 
         return knowledge
@@ -604,7 +1090,7 @@ class KnowledgeBuilder:
             fname_lower = fname.lower()
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
-                    content = f.read()
+                    content = self._strip_frontmatter(f.read())
                 head = content[:400].lower()
                 for name in candidates:
                     if name.lower() in fname_lower or name.lower() in head:
@@ -627,9 +1113,13 @@ class KnowledgeBuilder:
             fpath = os.path.join(KNOWLEDGE_DIR, fname)
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
-            result.append({"name": fname, "path": fpath, "content": content,
+            file_meta, body = self._split_frontmatter(content)
+            meta = metadata.get(fname, {})
+            merged_meta = dict(file_meta)
+            merged_meta.update(meta)
+            result.append({"name": fname, "path": fpath, "content": body,
                             "pinned": fname in pinned,
-                            "metadata": metadata.get(fname, {})})
+                            "metadata": merged_meta})
         return result
 
     def suggested_context(self, sender_email: str, recipient_emails=None) -> list:
@@ -660,7 +1150,7 @@ class KnowledgeBuilder:
         if not fpath.endswith(".md") or not os.path.exists(fpath):
             return None
         with open(fpath, "r", encoding="utf-8") as f:
-            return f.read()
+            return self._strip_frontmatter(f.read())
 
     def save_knowledge_file(self, filename: str, content: str, source: str = "manual", match_patterns=None, aliases=None) -> dict:
         if not filename.endswith(".md"):
@@ -668,8 +1158,6 @@ class KnowledgeBuilder:
         filename = self._safe_filename(filename.replace(".md", "")) + ".md"
         fpath = os.path.join(KNOWLEDGE_DIR, filename)
         existed = os.path.exists(fpath)
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(content)
         metadata = self._load_metadata()
         if source != "manual":
             metadata[filename] = self._current_llm_metadata(source)
@@ -681,7 +1169,10 @@ class KnowledgeBuilder:
         if aliases is not None:
             metadata.setdefault(filename, self._metadata_template("manual"))
             metadata[filename]["aliases"] = self._normalize_aliases(aliases)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(self._compose_markdown(filename, content, metadata.get(filename, {})))
         self._save_metadata(metadata)
+        self.enrich_obsidian_links([filename], update_all=not existed)
         return {"success": True, "name": filename}
 
     def rename_knowledge_file(self, filename: str, new_filename: str) -> dict:
@@ -703,9 +1194,11 @@ class KnowledgeBuilder:
         if old_name in metadata:
             metadata[new_name] = metadata.pop(old_name)
             self._save_metadata(metadata)
+            self._sync_file_frontmatter(new_name, metadata[new_name])
 
         pinned = [new_name if os.path.basename(p) == old_name else p for p in self.get_pinned()]
         self.set_pinned(pinned)
+        self.enrich_obsidian_links(update_all=True)
         return {"success": True, "name": new_name}
 
     def merge_knowledge_files(self, target: str, source: str) -> dict:
@@ -721,12 +1214,11 @@ class KnowledgeBuilder:
             return {"success": False, "error": "Source file not found"}
 
         with open(target_path, "r", encoding="utf-8") as f:
-            target_content = f.read().rstrip()
+            target_content = self._strip_frontmatter(f.read()).rstrip()
         with open(source_path, "r", encoding="utf-8") as f:
-            source_content = f.read().strip()
-        merged_content = f"{target_content}\n\n---\n\n## Merged from {source_name}\n\n{source_content}\n"
-        with open(target_path, "w", encoding="utf-8") as f:
-            f.write(merged_content)
+            source_content = self._strip_frontmatter(f.read()).strip()
+        source_stem = source_name.removesuffix(".md")
+        merged_content = f"{target_content}\n\n---\n\n## Merged from [[{source_stem}]]\n\n{source_content}\n"
 
         metadata = self._load_metadata()
         target_meta = metadata.setdefault(target_name, self._metadata_template("manual"))
@@ -742,7 +1234,10 @@ class KnowledgeBuilder:
             source_meta.get("match_patterns", []),
         )
         metadata.pop(source_name, None)
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(self._compose_markdown(target_name, merged_content, target_meta))
         self._save_metadata(metadata)
+        self.enrich_obsidian_links([target_name])
 
         os.remove(source_path)
         pinned = [p for p in self.get_pinned() if os.path.basename(p) != source_name]

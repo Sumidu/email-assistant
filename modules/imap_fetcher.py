@@ -360,6 +360,7 @@ class IMAPFetcher:
                 database.move_email_local_folder(email_id, spam_folder)
             else:
                 database.delete_email_local(email_id)
+            database.record_processed_action("spam", email_id=email_id, account_id=self.account_id)
             return {"success": True, "folder": spam_folder}
         finally:
             try:

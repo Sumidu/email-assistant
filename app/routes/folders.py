@@ -18,24 +18,27 @@ def folders():
 def discover_imap_folders():
     data = request.json or {}
     account_id = data.get("account_id")
-    if account_id and account_id in rt.fetchers:
-        try:
-            folders = rt.fetchers[account_id].list_imap_folders()
-            return jsonify({"success": True, "folders": folders})
-        except Exception as exc:
-            return jsonify({"success": False, "error": str(exc)}), 400
+    saved_account = next(
+        (acct for acct in rt.config.get("accounts", []) if acct.get("id") == account_id),
+        None,
+    )
+    saved_imap = dict(saved_account.get("imap", {})) if saved_account else {}
+    imap_data = {
+        "server": data.get("server") or saved_imap.get("server", ""),
+        "port": int(data.get("port") or saved_imap.get("port", 993)),
+        "username": data.get("username") or saved_imap.get("username", ""),
+        "password": data.get("password") or saved_imap.get("password", ""),
+        "inbox_folder": data.get("inbox_folder") or saved_imap.get("inbox_folder", "INBOX"),
+        "sent_folder": data.get("sent_folder") or saved_imap.get("sent_folder", "Sent Items"),
+        "spam_folder": data.get("spam_folder") or saved_imap.get("spam_folder", ""),
+    }
+    if imap_data["password"] == "••••••••":
+        imap_data["password"] = saved_imap.get("password", "")
 
     tmp_account = {
-        "id": "__tmp__",
-        "name": "tmp",
-        "imap": {
-            "server": data.get("server", ""),
-            "port": int(data.get("port", 993)),
-            "username": data.get("username", ""),
-            "password": data.get("password", ""),
-            "inbox_folder": data.get("inbox_folder", "INBOX"),
-            "sent_folder": data.get("sent_folder", "Sent Items"),
-        },
+        "id": account_id or "__tmp__",
+        "name": saved_account.get("name", "tmp") if saved_account else "tmp",
+        "imap": imap_data,
     }
     try:
         folders = IMAPFetcher(tmp_account).list_imap_folders()

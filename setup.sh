@@ -111,10 +111,39 @@ if [ "${UPGRADE_PIP:-0}" = "1" ]; then
 fi
 python -m pip install --disable-pip-version-check --no-cache-dir -r requirements.txt -q
 
-# ── Config ────────────────────────────────────────────────────────────────
-CONFIG_DIR="$HOME/email_assistant"
-CONFIG_PATH="$CONFIG_DIR/config.json"
-mkdir -p "$CONFIG_DIR"
+# ── Config / runtime directories ──────────────────────────────────────────
+APP_SUPPORT_DIR="$HOME/Library/Application Support/Email Assistant"
+LOG_DIR="$HOME/Library/Logs/Email Assistant"
+CACHE_DIR="$HOME/Library/Caches/Email Assistant"
+ICLOUD_ROOT="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
+if [ -d "$ICLOUD_ROOT" ]; then
+  KNOWLEDGE_DIR="$ICLOUD_ROOT/Email Assistant/Knowledge"
+else
+  KNOWLEDGE_DIR="$APP_SUPPORT_DIR/Knowledge"
+fi
+CONFIG_PATH="$APP_SUPPORT_DIR/config.json"
+LEGACY_DIR="$HOME/email_assistant"
+
+mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR" "$CACHE_DIR" "$KNOWLEDGE_DIR"
+
+if [ -d "$LEGACY_DIR" ]; then
+  if [ ! -f "$CONFIG_PATH" ] && [ -f "$LEGACY_DIR/config.json" ]; then
+    cp "$LEGACY_DIR/config.json" "$CONFIG_PATH"
+    echo "  Migrated config from $LEGACY_DIR/config.json"
+  fi
+  if [ ! -f "$APP_SUPPORT_DIR/emails.db" ] && [ -f "$LEGACY_DIR/emails.db" ]; then
+    cp "$LEGACY_DIR/emails.db" "$APP_SUPPORT_DIR/emails.db"
+    echo "  Migrated mail database from $LEGACY_DIR/emails.db"
+  fi
+  if [ ! -f "$LOG_DIR/llm_requests.log" ] && [ -f "$LEGACY_DIR/llm_requests.log" ]; then
+    cp "$LEGACY_DIR/llm_requests.log" "$LOG_DIR/llm_requests.log"
+    echo "  Migrated LLM log from $LEGACY_DIR/llm_requests.log"
+  fi
+  if [ -d "$LEGACY_DIR/knowledge" ]; then
+    cp -Rn "$LEGACY_DIR/knowledge/." "$KNOWLEDGE_DIR/"
+    echo "  Migrated knowledge files from $LEGACY_DIR/knowledge"
+  fi
+fi
 
 if [ ! -f "$CONFIG_PATH" ]; then
   cp config.json.example "$CONFIG_PATH"
@@ -127,9 +156,9 @@ else
   echo "  Config already exists — skipping: $CONFIG_PATH"
 fi
 
-# ── Knowledge dir ─────────────────────────────────────────────────────────
-mkdir -p "$CONFIG_DIR/knowledge"
-echo "  Knowledge directory: $CONFIG_DIR/knowledge"
+echo "  App data directory: $APP_SUPPORT_DIR"
+echo "  Log directory: $LOG_DIR"
+echo "  Knowledge directory: $KNOWLEDGE_DIR"
 
 echo ""
 echo "  Setup complete!"

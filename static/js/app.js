@@ -35,7 +35,9 @@ document.querySelectorAll(".modal-close,[data-close]").forEach(el=>{
   el.addEventListener("click",()=>closeModal(el.dataset.close||el.closest(".modal-overlay").id));
 });
 document.querySelectorAll(".modal-overlay").forEach(o=>{
-  o.addEventListener("click",e=>{if(e.target===o)o.classList.remove("open");});
+  o.addEventListener("click",e=>{
+    if(e.target===o&&o.id!=="settings-modal")o.classList.remove("open");
+  });
 });
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape")document.querySelectorAll(".modal-overlay.open").forEach(m=>m.classList.remove("open"));
@@ -68,14 +70,15 @@ const activeLlmSelect=document.getElementById("active-llm-select");
 activeLlmSelect.className="status-select";
 function setStatus(msg,state="idle"){
   statusMsg.textContent=msg;
+  statusMsg.title=msg;
   statusDot.className="sb-dot"+(state==="busy"?" amber":state==="ok"?" green":state==="err"?" red":"");
 }
 
 async function refreshFinishedToday(){
   try{
     const data=await fetch("/api/stats/today").then(r=>r.json());
-    const n=data.finished_today||0;
-    document.getElementById("finished-today-count").textContent=`${n} finished today`;
+    const n=data.processed_today??data.finished_today??0;
+    document.getElementById("finished-today-count").textContent=`${n} processed today`;
   }catch{}
 }
 
@@ -123,13 +126,24 @@ window.addEventListener("resize",hideFloatingTooltip);
 const progressDrawer=document.getElementById("progress-drawer");
 const progressLog=document.getElementById("progress-log");
 const pdBar=document.getElementById("pd-bar");
+const pdMinimizeBtn=document.getElementById("pd-minimize");
 let progressMinimized=localStorage.getItem("progress-minimized")==="1";
 document.getElementById("pd-close").addEventListener("click",()=>progressDrawer.classList.remove("open"));
-document.getElementById("pd-minimize").addEventListener("click",()=>{
+
+function updateProgressMinimizeButton(){
+  pdMinimizeBtn.innerHTML=progressMinimized?"&#9634;":"&minus;";
+  const label=progressMinimized?"Restore progress":"Minimize progress";
+  pdMinimizeBtn.title=label;
+  pdMinimizeBtn.setAttribute("aria-label",label);
+}
+
+pdMinimizeBtn.addEventListener("click",()=>{
   progressMinimized=!progressMinimized;
   localStorage.setItem("progress-minimized",progressMinimized?"1":"0");
   progressDrawer.classList.toggle("minimized",progressMinimized);
+  updateProgressMinimizeButton();
 });
+updateProgressMinimizeButton();
 
 function showProgress(lines,progressPct){
   progressDrawer.classList.add("open");
@@ -171,6 +185,7 @@ function startTaskPoll(label,expectedSteps,onDone){
       setTimeout(hideProgress,4000);
       progressMinimized=wasMinimized;
       localStorage.setItem("progress-minimized",progressMinimized?"1":"0");
+      updateProgressMinimizeButton();
       if(isKnowledgeTask(label))await refreshKnowledgeIndicators();
       if(onDone)onDone(s.result);
     }
@@ -437,6 +452,7 @@ async function markEmailSpam(emailId=currentEmail?.id){
       return;
     }
     setStatus("Moved to remote Spam/Junk folder","ok");
+    refreshFinishedToday();
     await refreshAfterEmailMove(emailId,nextId);
   }catch(err){
     setStatus("Spam move failed: "+err.message,"err");
@@ -449,6 +465,7 @@ markSpamBtn.addEventListener("click",()=>markEmailSpam());
 
 generateContactKbBtn.addEventListener("click",async()=>{
   if(!currentEmail)return;
+  if(!requireActiveLlm())return;
   if(taskPollInterval){setStatus("A task is already running","err");return;}
   try{
     generateContactKbBtn.disabled=true;
@@ -675,6 +692,7 @@ function offerKbSave(kbSave){
 
 async function sendChat(userText){
   if(!currentEmail){setStatus("Select an email first","err");return;}
+  if(!requireActiveLlm())return;
   if(!userText.trim())return;
   addChatMessage("user",userText);
   chatInput.value="";chatInput.style.height="auto";
@@ -1128,6 +1146,7 @@ function renderQuickTemplateButtons(){
   wrap.querySelectorAll("[data-template-index]").forEach(btn=>{
     btn.addEventListener("click",()=>sendChat(templates[parseInt(btn.dataset.templateIndex)].message));
   });
+  updateLlmActionAvailability();
 }
 
 function renderQuickTemplateEditor(){
@@ -1167,11 +1186,53 @@ function updateActiveHealthDot(){
   if(llmHealthCheckActive){
     dot.className="llm-health-dot testing";
     dot.title="Testing LLM connection…";
+    updateLlmActionAvailability();
     return;
   }
   const h=llmHealth[activeLlmSelect.value];
   dot.className="llm-health-dot "+healthClass(h?.ok);
   dot.title=h?.ok===true?"LLM reachable":h?.ok===false?("LLM unavailable"+(h.error?": "+h.error:"")):"LLM status unknown";
+  updateLlmActionAvailability();
+}
+
+function activeLlmUnavailable(){
+  return llmHealth[activeLlmSelect.value]?.ok===false;
+}
+
+function activeLlmErrorMessage(){
+  const label=activeLlmSelect.options[activeLlmSelect.selectedIndex]?.text||"LLM";
+  const h=llmHealth[activeLlmSelect.value];
+  return `${label} is unavailable${h?.error?": "+h.error:""}. Click the status dot to test again.`;
+}
+
+function requireActiveLlm(){
+  if(!activeLlmUnavailable())return true;
+  setStatus(activeLlmErrorMessage(),"err");
+  return false;
+}
+
+function updateLlmActionAvailability(){
+  const disabled=activeLlmUnavailable();
+  const title=disabled?activeLlmErrorMessage():"";
+  [
+    "btn-propose",
+    "btn-chat-send",
+    "btn-build-kb",
+    "btn-generate-contact-kb",
+    "btn-start-todo-llm",
+  ].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    if(el.dataset.llmOriginalTitle===undefined)el.dataset.llmOriginalTitle=el.title||"";
+    el.disabled=disabled;
+    if(disabled)el.title=title;
+    else el.title=el.dataset.llmOriginalTitle;
+  });
+  document.querySelectorAll(".quick-template-btn").forEach(btn=>{
+    if(btn.dataset.llmOriginalTitle===undefined)btn.dataset.llmOriginalTitle=btn.title||"";
+    btn.disabled=disabled;
+    btn.title=disabled?title:btn.dataset.llmOriginalTitle;
+  });
 }
 
 async function loadLlmHealth(llmId=""){
@@ -1296,6 +1357,114 @@ document.getElementById("btn-llm-delete").addEventListener("click",()=>{
   if(settingsConfig?.default_llm_id===llm.id)settingsConfig.default_llm_id=llmDrafts[0].id;
   selectedLlmId=llmDrafts[0].id;
   populateLlmForm(llmDrafts[0]);
+});
+
+function bytesToBase64(bytes){
+  let s="";
+  bytes.forEach(b=>{s+=String.fromCharCode(b);});
+  return btoa(s);
+}
+
+function base64ToBytes(value){
+  const raw=atob(value);
+  const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);
+  return out;
+}
+
+async function portableCryptoKey(password,salt){
+  const material=await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt,iterations:250000,hash:"SHA-256"},
+    material,
+    {name:"AES-GCM",length:256},
+    false,
+    ["encrypt","decrypt"]
+  );
+}
+
+async function encryptPortableConfig(config,password){
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await portableCryptoKey(password,salt);
+  const plaintext=new TextEncoder().encode(JSON.stringify(config,null,2));
+  const ciphertext=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,plaintext));
+  return {
+    kind:"email-assistant-encrypted-portable-config",
+    version:1,
+    kdf:"PBKDF2-SHA256",
+    iterations:250000,
+    cipher:"AES-256-GCM",
+    salt:bytesToBase64(salt),
+    iv:bytesToBase64(iv),
+    ciphertext:bytesToBase64(ciphertext),
+  };
+}
+
+async function decryptPortableConfig(envelope,password){
+  if(envelope?.kind!=="email-assistant-encrypted-portable-config")throw new Error("This is not an encrypted Email Assistant config.");
+  const salt=base64ToBytes(envelope.salt||"");
+  const iv=base64ToBytes(envelope.iv||"");
+  const ciphertext=base64ToBytes(envelope.ciphertext||"");
+  const key=await portableCryptoKey(password,salt);
+  const plaintext=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ciphertext);
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+function portablePassword(){
+  return document.getElementById("cfg-portable-password")?.value||"";
+}
+
+document.getElementById("btn-export-portable-config").addEventListener("click",async()=>{
+  const password=portablePassword();
+  if(password.length<8){setStatus("Use an export password with at least 8 characters","err");return;}
+  try{
+    const cfg=await fetch("/api/config/portable").then(r=>r.json());
+    const encrypted=await encryptPortableConfig(cfg,password);
+    const blob=new Blob([JSON.stringify(encrypted,null,2)],{type:"application/json"});
+    const a=document.createElement("a");
+    const stamp=new Date().toISOString().slice(0,10);
+    a.href=URL.createObjectURL(blob);
+    a.download=`email-assistant-config-${stamp}.encrypted.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    setStatus("Encrypted portable config exported","ok");
+  }catch(err){setStatus("Portable config export failed: "+err.message,"err");}
+});
+
+document.getElementById("btn-import-portable-config").addEventListener("click",()=>{
+  const password=portablePassword();
+  if(password.length<8){setStatus("Enter the import password first","err");return;}
+  document.getElementById("portable-config-file").click();
+});
+
+document.getElementById("portable-config-file").addEventListener("change",async function(){
+  const file=this.files?.[0];
+  this.value="";
+  if(!file)return;
+  const password=portablePassword();
+  if(!password){setStatus("Enter the import password first","err");return;}
+  try{
+    const envelope=JSON.parse(await file.text());
+    const config=await decryptPortableConfig(envelope,password);
+    const accountCount=(config.accounts||[]).length;
+    const llmCount=(config.llms||[]).length;
+    if(!confirm(`Import encrypted portable config?\n\nThis will replace account and LLM definitions with ${accountCount} account(s) and ${llmCount} LLM(s). Existing passwords/API keys for matching IDs stay in the Keychain. New imported accounts need passwords afterwards.`))return;
+    const res=await fetch("/api/config/portable/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(config)}).then(r=>r.json());
+    if(!res.success){setStatus("Portable config import failed: "+(res.error||"?"),"err");return;}
+    await loadSettings();
+    await loadActiveLlmPicker();
+    await loadFolders();
+    setStatus("Portable config imported","ok");
+  }catch(err){setStatus("Portable config import failed: "+err.message,"err");}
 });
 
 async function loadSettings(){
@@ -1493,13 +1662,29 @@ document.getElementById("btn-discover-folders").addEventListener("click",async()
   const status=document.getElementById("folder-picker-status");
   status.textContent="Connecting…";status.style.color="var(--muted)";
   const accountId=document.getElementById("cfg-acct-id").value.trim();
+  const savedAccount=accountsCache.find(a=>a.id===accountId);
+  const server=document.getElementById("cfg-imap-server").value.trim();
+  const username=document.getElementById("cfg-imap-username").value.trim();
+  const password=document.getElementById("cfg-imap-password").value;
+  if(!server||!username){
+    status.textContent="Enter server and username before discovering folders.";
+    status.style.color="var(--red)";
+    return;
+  }
+  if(!password&&!savedAccount?.imap?.password){
+    status.textContent="Enter the account password before discovering folders.";
+    status.style.color="var(--red)";
+    return;
+  }
   const payload={
     account_id:accountId||undefined,
-    server:document.getElementById("cfg-imap-server").value.trim(),
+    server,
     port:parseInt(document.getElementById("cfg-imap-port").value)||993,
-    username:document.getElementById("cfg-imap-username").value.trim(),
-    password:document.getElementById("cfg-imap-password").value,
-    inbox_folder:"INBOX",sent_folder:"Sent Items",
+    username,
+    password,
+    inbox_folder:savedAccount?.imap?.inbox_folder||"INBOX",
+    sent_folder:savedAccount?.imap?.sent_folder||"Sent Items",
+    spam_folder:savedAccount?.imap?.spam_folder||"",
   };
   try{
     const res=await fetch("/api/imap_folders",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(r=>r.json());
@@ -1609,6 +1794,7 @@ document.getElementById("btn-sync").addEventListener("click",()=>{
   fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});})).catch(err=>setStatus("Sync error: "+err.message,"err"));
 });
 document.getElementById("btn-build-kb").addEventListener("click",async()=>{
+  if(!requireActiveLlm())return;
   if(taskPollInterval){setStatus("A task is already running","err");return;}
   try{
     const stats=await fetch("/api/knowledge_stats").then(r=>r.json());
@@ -1660,6 +1846,7 @@ function openTodosModal(options={}){
   document.getElementById("btn-export-todos").hidden=true;
   document.getElementById("btn-create-ews-todos").hidden=true;
   todoPendingPayload=null;
+  updateLlmActionAvailability();
   const popover=document.getElementById("todo-popover");
   const shouldOpen=options.forceOpen||!popover.open;
   if(shouldOpen){
@@ -1805,6 +1992,7 @@ async function refreshTodoPreview(){
       :`${preview.data.analyzed} local emails will be scanned individually by the LLM${preview.data.matched>preview.data.analyzed?` (${preview.data.matched} matched locally, capped at ${preview.data.limit})`: ""}.`;
     todoPendingPayload=payload;
     llmBtn.hidden=false;
+    updateLlmActionAvailability();
     box.innerHTML=`<div class="todo-empty">${escHtml(message)}<br>Adjust the filters or press Convert using LLM to continue.</div>`;
   }catch(err){
     box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
@@ -1822,6 +2010,10 @@ async function refreshTodoPreview(){
 async function startTodoLlm({skipConfirm=false}={}){
   const btn=document.getElementById("btn-start-todo-llm");
   const box=document.getElementById("todos-results");
+  if(!requireActiveLlm()){
+    box.innerHTML=`<div class="todo-empty">${escHtml(activeLlmErrorMessage())}</div>`;
+    return;
+  }
   const payload=todoPendingPayload;
   if(!payload){
     box.innerHTML='<div class="todo-empty">Wait for the live email count first.</div>';
@@ -1849,6 +2041,7 @@ async function startTodoLlm({skipConfirm=false}={}){
     box.innerHTML=`<div class="todo-empty">Todo search failed: ${escHtml(err.message)}</div>`;
   }finally{
     btn.disabled=false;
+    updateLlmActionAvailability();
   }
 }
 

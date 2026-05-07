@@ -5,7 +5,9 @@ import email.utils
 from datetime import datetime
 from typing import Optional
 
-DB_PATH = os.path.expanduser("~/email_assistant/emails.db")
+from app import paths
+
+DB_PATH = str(paths.DB_PATH)
 FINISHED_FOLDER = "Finished"
 
 
@@ -73,6 +75,13 @@ def init_db():
             updated_at  TEXT,
             PRIMARY KEY (account_id, uid, occurrence)
         );
+        CREATE TABLE IF NOT EXISTS processed_actions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            email_id    TEXT,
+            account_id  TEXT,
+            action      TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
     """)
 
     ensure_email_column("account_id", "account_id TEXT NOT NULL DEFAULT 'default'")
@@ -90,6 +99,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
         CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
         CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
+        CREATE INDEX IF NOT EXISTS idx_processed_actions_created ON processed_actions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_processed_actions_action ON processed_actions(action, created_at);
     """)
 
     # Migrate: prefix existing IDs with 'default::' to match the composite-ID scheme
@@ -396,6 +407,17 @@ def delete_email_local(email_id: str) -> dict:
     return {"success": cur.rowcount > 0}
 
 
+def record_processed_action(action: str, email_id: str = "", account_id: str = "") -> None:
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO processed_actions (email_id, account_id, action, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (email_id, account_id, action, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_all_emails():
     conn = get_connection()
     rows = conn.execute(
@@ -436,6 +458,22 @@ def get_finished_today_count() -> int:
     ).fetchone()[0]
     conn.close()
     return int(count or 0)
+
+
+def get_processed_today_count() -> dict:
+    conn = get_connection()
+    finished = conn.execute(
+        "SELECT COUNT(*) FROM emails WHERE done_at >= datetime('now', 'localtime', 'start of day')"
+    ).fetchone()[0]
+    spam = conn.execute(
+        """SELECT COUNT(*) FROM processed_actions
+           WHERE action = 'spam'
+             AND created_at >= datetime('now', 'localtime', 'start of day')"""
+    ).fetchone()[0]
+    conn.close()
+    finished = int(finished or 0)
+    spam = int(spam or 0)
+    return {"processed_today": finished + spam, "finished_today": finished, "spam_today": spam}
 
 
 def get_email_count(account_id=None):
