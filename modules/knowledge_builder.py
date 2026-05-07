@@ -31,7 +31,6 @@ class KnowledgeBuilder:
         self.config = config
         self._last_llm = None
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
-        self.migrate_to_obsidian_format()
 
     # ---- LLM call ----------------------------------------------------------
 
@@ -126,6 +125,7 @@ class KnowledgeBuilder:
             return {"success": True, "updated": 0}
         metadata = self._load_metadata()
         updated = 0
+        metadata_changed = False
         for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
             if not fname.endswith(".md"):
                 continue
@@ -133,7 +133,10 @@ class KnowledgeBuilder:
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     old = f.read()
-                meta = metadata.setdefault(fname, self._metadata_template("manual"))
+                if fname not in metadata:
+                    metadata[fname] = self._metadata_template("manual")
+                    metadata_changed = True
+                meta = metadata[fname]
                 new = self._compose_markdown(fname, old, meta)
                 if new != old:
                     with open(fpath, "w", encoding="utf-8") as f:
@@ -141,7 +144,11 @@ class KnowledgeBuilder:
                     updated += 1
             except Exception:
                 continue
-        self._save_metadata(metadata)
+        if updated or metadata_changed:
+            try:
+                self._save_metadata(metadata)
+            except OSError as exc:
+                return {"success": False, "updated": updated, "error": str(exc)}
         return {"success": True, "updated": updated}
 
     # ---- Obsidian links ----------------------------------------------------

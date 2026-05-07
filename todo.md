@@ -98,6 +98,11 @@ Effort scale:
 
 ### M
 
+- [ ] Add an in-app update checker
+  - Category: Feature / Distribution
+  - Clarification: Add a Settings/About button that checks GitHub for the latest version. In a git checkout it may offer `git pull --ff-only` plus setup/restart guidance; in the standalone app it should prefer GitHub Releases or open the release page.
+  - Notes: Start conservatively with "Check for Updates"; full standalone auto-update requires release artifacts, versioning, and ideally checksum/signature verification.
+
 - [ ] Newsletter detection
   - Category: Feature
   - Clarification: Detect newsletters using headers such as `List-Unsubscribe`, bulk sender patterns, no-reply senders, and frequency heuristics.
