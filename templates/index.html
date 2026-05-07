@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='email-actions-color-20260503') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='spam-action-20260507') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -48,6 +48,7 @@
           <div id="email-panel-actions">
             <button class="rbtn kb-action" id="btn-generate-contact-kb" style="display:none;">&#9670; Generate Knowledge</button>
             <button class="rbtn todo-action" id="btn-email-find-todos" style="display:none;">&#9745; Find Todos</button>
+            <button class="rbtn spam-action icon-action" id="btn-mark-spam" style="display:none;" title="Move to remote Spam/Junk folder">&#128683;</button>
             <button class="rbtn primary finish-action icon-action" id="btn-mark-done" style="display:none;" title="Done">&#10003;</button>
           </div>
         </div>
@@ -469,6 +470,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='email-actions-color-20260503') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='spam-action-20260507') }}"></script>
 </body>
 </html>

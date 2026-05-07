@@ -19,10 +19,19 @@ def get_connection():
 def init_db():
     conn = get_connection()
 
-    # Base table — without account_id so it's safe on both new and existing DBs
+    def email_columns():
+        return [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
+
+    def ensure_email_column(name: str, ddl: str):
+        if name not in email_columns():
+            conn.execute(f"ALTER TABLE emails ADD COLUMN {ddl}")
+
+    # Create the current schema for fresh installs. Existing databases are
+    # migrated below before any indexes rely on newer columns.
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS emails (
             id          TEXT PRIMARY KEY,
+            account_id  TEXT NOT NULL DEFAULT 'default',
             folder      TEXT,
             subject     TEXT,
             sender      TEXT,
@@ -33,10 +42,13 @@ def init_db():
             body_html   TEXT,
             message_id  TEXT,
             in_reply_to TEXT,
-            fetched_at  TEXT
+            fetched_at  TEXT,
+            kb_processed_at TEXT,
+            done_at     TEXT,
+            original_folder TEXT,
+            imap_uid    INTEGER,
+            uidvalidity TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
-        CREATE INDEX IF NOT EXISTS idx_emails_date   ON emails(date);
         CREATE TABLE IF NOT EXISTS sync_state (
             account_id    TEXT NOT NULL,
             folder        TEXT NOT NULL,
@@ -45,32 +57,6 @@ def init_db():
             last_sync_at  TEXT,
             PRIMARY KEY (account_id, folder)
         );
-    """)
-
-    # Migrate: add account_id column if missing
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "imap_uid" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN imap_uid INTEGER")
-        conn.commit()
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "uidvalidity" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN uidvalidity TEXT")
-        conn.commit()
-
-    conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
-    """)
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "account_id" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN account_id TEXT NOT NULL DEFAULT 'default'")
-        conn.commit()
-
-    # Now safe to create account-scoped indexes
-    conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
-        CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
         CREATE TABLE IF NOT EXISTS calendar_events (
             account_id  TEXT NOT NULL,
             uid         TEXT NOT NULL,
@@ -87,6 +73,22 @@ def init_db():
             updated_at  TEXT,
             PRIMARY KEY (account_id, uid, occurrence)
         );
+    """)
+
+    ensure_email_column("account_id", "account_id TEXT NOT NULL DEFAULT 'default'")
+    ensure_email_column("date_ts", "date_ts REAL")
+    ensure_email_column("kb_processed_at", "kb_processed_at TEXT")
+    ensure_email_column("done_at", "done_at TEXT")
+    ensure_email_column("original_folder", "original_folder TEXT")
+    ensure_email_column("imap_uid", "imap_uid INTEGER")
+    ensure_email_column("uidvalidity", "uidvalidity TEXT")
+
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
+        CREATE INDEX IF NOT EXISTS idx_emails_date   ON emails(date);
+        CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
+        CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
+        CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
         CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
     """)
 
@@ -101,27 +103,6 @@ def init_db():
         )
         conn.commit()
 
-    # Migrate: add kb_processed_at column if missing
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "kb_processed_at" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN kb_processed_at TEXT")
-        conn.commit()
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "date_ts" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN date_ts REAL")
-        conn.commit()
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "done_at" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN done_at TEXT")
-        conn.commit()
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-    if "original_folder" not in cols:
-        conn.execute("ALTER TABLE emails ADD COLUMN original_folder TEXT")
-        conn.commit()
-
     rows = conn.execute(
         "SELECT id, date FROM emails WHERE date_ts IS NULL AND date IS NOT NULL AND date != ''"
     ).fetchall()
@@ -132,6 +113,7 @@ def init_db():
         )
         conn.commit()
 
+    conn.commit()
     conn.close()
 
 
@@ -285,12 +267,46 @@ def email_uid_exists(account_id: str, folder: str, uidvalidity: str, imap_uid: i
     conn = get_connection()
     row = conn.execute(
         """SELECT 1 FROM emails
-           WHERE account_id = ? AND folder = ? AND uidvalidity = ? AND imap_uid = ?
+           WHERE account_id = ?
+             AND uidvalidity = ?
+             AND imap_uid = ?
+             AND (folder = ? OR original_folder = ?)
            LIMIT 1""",
-        (account_id, folder, uidvalidity, imap_uid),
+        (account_id, uidvalidity, imap_uid, folder, folder),
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def remove_missing_remote_emails(account_id: str, folder: str, uidvalidity: str, remote_uids: set[int]) -> int:
+    """Delete local rows whose tracked IMAP UID no longer exists remotely.
+
+    Rows in the local Finished folder are still tied to their original IMAP
+    folder via original_folder. If the remote UID disappears there, the local
+    Finished copy should disappear too; if it still exists remotely, it stays
+    local-only and is not moved back to the inbox.
+    """
+    if not uidvalidity:
+        return 0
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, imap_uid FROM emails
+           WHERE account_id = ?
+             AND uidvalidity = ?
+             AND imap_uid IS NOT NULL
+             AND (folder = ? OR original_folder = ?)""",
+        (account_id, uidvalidity, folder, folder),
+    ).fetchall()
+    stale_ids = [
+        row["id"]
+        for row in rows
+        if row["imap_uid"] is not None and int(row["imap_uid"]) not in remote_uids
+    ]
+    if stale_ids:
+        conn.executemany("DELETE FROM emails WHERE id = ?", [(eid,) for eid in stale_ids])
+        conn.commit()
+    conn.close()
+    return len(stale_ids)
 
 
 def get_sync_state(account_id: str, folder: str) -> dict | None:
@@ -355,6 +371,29 @@ def unmark_email_done(email_id: str) -> dict:
     conn.commit()
     conn.close()
     return {"success": True, "folder": target_folder}
+
+
+def move_email_local_folder(email_id: str, folder: str) -> dict:
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM emails WHERE id = ?", (email_id,)).fetchone()
+    if not row:
+        conn.close()
+        return {"success": False, "error": "Email not found"}
+    conn.execute(
+        "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
+        (folder, email_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"success": True, "folder": folder}
+
+
+def delete_email_local(email_id: str) -> dict:
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM emails WHERE id = ?", (email_id,))
+    conn.commit()
+    conn.close()
+    return {"success": cur.rowcount > 0}
 
 
 def get_all_emails():

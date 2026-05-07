@@ -10,6 +10,7 @@
         "password":      "your-password-or-app-password",
         "inbox_folder":  "INBOX",
         "sent_folder":   "Sent Items",
+        "spam_folder":   "Junk Email",
         "fetch_limit":   300
       }
     }

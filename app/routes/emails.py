@@ -23,7 +23,7 @@ def emails():
     )
     if rt.kb:
         for row in rows:
-            row["knowledge_matches"] = rt.kb.knowledge_matches_for_email(row)
+            row["knowledge_matches"] = rt.kb.exact_sender_knowledge_matches_for_email(row)
     return jsonify(rows)
 
 
@@ -46,6 +46,19 @@ def mark_email_done(email_id):
 def unmark_email_done(email_id):
     result = database.unmark_email_done(email_id)
     status = 200 if result.get("success") else 404
+    return jsonify(result), status
+
+
+@bp.route("/email/<path:email_id>/spam", methods=["POST"])
+def mark_email_spam(email_id):
+    data = database.get_email_by_id(email_id)
+    if not data:
+        return jsonify({"success": False, "error": "Email not found"}), 404
+    fetcher = rt.fetchers.get(data.get("account_id"))
+    if not fetcher:
+        return jsonify({"success": False, "error": "Account not found"}), 404
+    result = fetcher.move_email_to_spam(email_id)
+    status = 200 if result.get("success") else 400
     return jsonify(result), status
 
 

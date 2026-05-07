@@ -108,8 +108,15 @@ def set_active_llm():
 
 @bp.route("/llm/status", methods=["GET"])
 def llm_status():
+    only_id = request.args.get("id") or ""
     statuses = []
-    for provider in rt.config.get("llms", []):
+    providers = [
+        provider for provider in rt.config.get("llms", [])
+        if not only_id or provider.get("id") == only_id
+    ]
+    if only_id and not providers:
+        return jsonify({"error": "Unknown LLM"}), 404
+    for provider in providers:
         url = provider.get("base_url", "").rstrip("/") + "/v1/models"
         headers = {}
         if provider.get("api_key"):

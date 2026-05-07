@@ -43,6 +43,7 @@ def create_account():
             "password": "",
             "inbox_folder": "INBOX",
             "sent_folder": "Sent Items",
+            "spam_folder": "",
             "provider_override": "auto",
             "calendar_enabled": False,
             "calendar_method": "ics",
@@ -65,7 +66,6 @@ def create_account():
     config_store.apply_account_detection(account)
     account["imap"]["password"] = password
     rt.config.setdefault("accounts", []).append(account)
-    config_store.apply_account_detection(acct)
     rt.save_config()
     rt.fetchers[new_id] = IMAPFetcher(account)
 

@@ -105,6 +105,11 @@ class IMAPFetcher:
         conn.login(self.imap_cfg["username"], self.imap_cfg["password"])
         return conn
 
+    @staticmethod
+    def _quote_folder(folder_name: str) -> str:
+        escaped = (folder_name or "").replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+
     # ---- fetching ----------------------------------------------------------
 
     def _uidvalidity(self, conn) -> str:
@@ -134,17 +139,33 @@ class IMAPFetcher:
             uids = uids[-limit:]
         return uids
 
-    def _fetch_folder(self, conn, folder_name: str, limit: int) -> int:
+    def _all_remote_uids(self, conn) -> set[int] | None:
+        status, data = conn.uid("search", None, "ALL")
+        if status != "OK" or not data:
+            return None
+        result = set()
+        for uid in data[0].split():
+            try:
+                result.add(int(uid))
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    def _fetch_folder(self, conn, folder_name: str, limit: int) -> dict:
         try:
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
             if status != "OK":
                 print(f"[IMAP] Could not select folder: {folder_name!r}")
-                return 0
+                return {"fetched": 0, "removed": 0, "remote": 0}
         except Exception as exc:
             print(f"[IMAP] select error for {folder_name!r}: {exc}")
-            return 0
+            return {"fetched": 0, "removed": 0, "remote": 0}
 
         uidvalidity = self._uidvalidity(conn)
+        remote_uids = self._all_remote_uids(conn)
+        removed = 0
+        if remote_uids is not None:
+            removed = database.remove_missing_remote_emails(self.account_id, folder_name, uidvalidity, remote_uids)
         mode = self.imap_cfg.get("sync_mode", "recent")
         since_date = self.imap_cfg.get("sync_since", "")
         state = database.get_sync_state(self.account_id, folder_name)
@@ -219,7 +240,7 @@ class IMAPFetcher:
 
         if uids:
             database.save_sync_state(self.account_id, folder_name, uidvalidity, max_seen_uid)
-        return count
+        return {"fetched": count, "removed": removed, "remote": len(remote_uids) if remote_uids is not None else None}
 
     # ---- IMAP folder discovery ---------------------------------------------
 
@@ -243,11 +264,15 @@ class IMAPFetcher:
             if not m:
                 continue
             raw = m.group(1).strip().strip('"')
+            flags = decoded.split(')', 1)[0].lower()
+            raw_lower = raw.lower()
             role = "other"
             if raw.upper() == inbox_name.upper():
                 role = "inbox"
             elif raw.upper() == sent_name.upper():
                 role = "sent"
+            elif "\\junk" in flags or raw_lower in {"junk", "spam", "junk email"} or raw_lower.endswith("/spam") or raw_lower.endswith("/junk"):
+                role = "spam"
             folders.append({
                 "name":    raw,
                 "role":    role,
@@ -255,6 +280,92 @@ class IMAPFetcher:
             })
 
         return sorted(folders, key=lambda f: (f["role"] != "inbox", f["role"] != "sent", f["name"].lower()))
+
+    def _spam_folder_name(self, conn) -> str:
+        configured = (self.imap_cfg.get("spam_folder") or "").strip()
+        if configured:
+            return configured
+        for folder in self.imap_cfg.get("sync_folders", []):
+            if folder.get("role") == "spam" and folder.get("name"):
+                return folder["name"]
+
+        status, data = conn.list()
+        if status != "OK" or not data:
+            return ""
+        fallback = ""
+        for line in data:
+            if not line:
+                continue
+            decoded = line.decode() if isinstance(line, bytes) else line
+            m = re.search(r'"/" (.+)$', decoded) or re.search(r'"\." (.+)$', decoded)
+            if not m:
+                continue
+            name = m.group(1).strip().strip('"')
+            flags = decoded.split(')', 1)[0].lower()
+            lower = name.lower()
+            if "\\junk" in flags:
+                return name
+            if lower in {"junk", "spam", "junk email"}:
+                return name
+            if lower.endswith("/spam") or lower.endswith("/junk"):
+                fallback = fallback or name
+        return fallback
+
+    def move_email_to_spam(self, email_id: str) -> dict:
+        row = database.get_email_by_id(email_id)
+        if not row:
+            return {"success": False, "error": "Email not found"}
+        if row.get("account_id") != self.account_id:
+            return {"success": False, "error": "Email belongs to a different account"}
+
+        source_folder = row.get("original_folder") or row.get("folder") or self.imap_cfg.get("inbox_folder", "INBOX")
+        imap_uid = row.get("imap_uid")
+        uidvalidity = row.get("uidvalidity") or ""
+        if not imap_uid or not uidvalidity:
+            return {"success": False, "error": "This email has no tracked IMAP UID. Sync the folder before moving it to spam."}
+
+        conn = self._connect()
+        try:
+            spam_folder = self._spam_folder_name(conn)
+            if not spam_folder:
+                return {"success": False, "error": "Could not find a spam/junk folder on the IMAP server."}
+
+            status, _ = conn.select(self._quote_folder(source_folder), readonly=False)
+            if status != "OK":
+                return {"success": False, "error": f"Could not open source folder: {source_folder}"}
+
+            current_uidvalidity = self._uidvalidity(conn)
+            if current_uidvalidity and current_uidvalidity != uidvalidity:
+                return {"success": False, "error": "The folder UIDVALIDITY changed. Run sync before moving this email."}
+
+            status, data = conn.uid("search", None, "UID", str(int(imap_uid)))
+            if status != "OK" or not data or str(int(imap_uid)).encode() not in data[0].split():
+                return {"success": False, "error": "The email was not found on the IMAP server. Run sync first."}
+
+            caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in getattr(conn, "capabilities", [])}
+            if "MOVE" not in caps:
+                cap_status, cap_data = conn.capability()
+                if cap_status == "OK" and cap_data:
+                    caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in cap_data[0].split()}
+            if "MOVE" not in caps:
+                return {"success": False, "error": "This IMAP server does not advertise UID MOVE. No fallback was attempted to avoid risking message loss."}
+
+            status, data = conn.uid("MOVE", str(int(imap_uid)), self._quote_folder(spam_folder))
+            if status != "OK":
+                detail = data[0].decode(errors="replace") if data and isinstance(data[0], bytes) else str(data)
+                return {"success": False, "error": f"IMAP move failed: {detail}"}
+
+            synced_folders = {f.get("name") for f in self._folders_to_sync()}
+            if spam_folder in synced_folders:
+                database.move_email_local_folder(email_id, spam_folder)
+            else:
+                database.delete_email_local(email_id)
+            return {"success": True, "folder": spam_folder}
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
 
     # ---- public API --------------------------------------------------------
 
@@ -282,8 +393,12 @@ class IMAPFetcher:
                 fname = f["name"]
                 if progress_callback:
                     progress_callback(f"[{self.account_name}] Fetching «{fname}»…")
-                count = self._fetch_folder(conn, fname, limit)
-                results["folders"][fname] = count
+                folder_result = self._fetch_folder(conn, fname, limit)
+                results["folders"][fname] = folder_result
+                if progress_callback and folder_result.get("removed"):
+                    progress_callback(
+                        f"[{self.account_name}] Removed {folder_result['removed']} local message(s) missing from «{fname}»"
+                    )
 
             conn.logout()
             results["success"] = True

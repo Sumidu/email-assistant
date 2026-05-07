@@ -144,9 +144,12 @@ function hideProgress(){progressDrawer.classList.remove("open");pdBar.style.widt
 // ─── Task polling ─────────────────────────────────────────────────────────
 let totalExpected=0,taskPollTicks=0,kbLiveRefreshBusy=false;
 function isKnowledgeTask(label){return String(label||"").toLowerCase().includes("knowledge");}
+function isSyncTask(label){return String(label||"").toLowerCase().startsWith("sync");}
 function startTaskPoll(label,expectedSteps,onDone){
   totalExpected=expectedSteps||0;
   taskPollTicks=0;
+  const wasMinimized=progressMinimized;
+  if(isSyncTask(label))progressMinimized=true;
   setStatus(label+"…","busy");
   progressLog.innerHTML="";
   progressDrawer.classList.add("open");
@@ -166,6 +169,8 @@ function startTaskPoll(label,expectedSteps,onDone){
       setStatus(ok?"Done — "+label:"Error: "+(s.result?.error||"?"),ok?"ok":"err");
       showProgress(lines,100);
       setTimeout(hideProgress,4000);
+      progressMinimized=wasMinimized;
+      localStorage.setItem("progress-minimized",progressMinimized?"1":"0");
       if(isKnowledgeTask(label))await refreshKnowledgeIndicators();
       if(onDone)onDone(s.result);
     }
@@ -228,7 +233,7 @@ function syncAccount(accountId){
   const label=acct?"Sync "+acct.name:"Sync";
   const folders=(acct?.imap?.sync_folders||[]).length||(acct?2:2);
   fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_id:accountId})})
-    .then(()=>startTaskPoll(label,folders*3,()=>loadFolders()))
+    .then(()=>startTaskPoll(label,folders*4,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});}))
     .catch(err=>setStatus("Sync error: "+err.message,"err"));
 }
 
@@ -250,7 +255,7 @@ function setupAutoSyncTimer(){
 }
 
 // ─── Email list ───────────────────────────────────────────────────────────
-async function loadEmailList(append=false,{preserveSelection=false}={}){
+async function loadEmailList(append=false,{preserveSelection=false,clearMissingSelection=false}={}){
   if(!currentFolder)return;
   try{
     const selectedId=preserveSelection?currentEmail?.id:null;
@@ -273,6 +278,10 @@ async function loadEmailList(append=false,{preserveSelection=false}={}){
     if(selectedId){
       const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(selectedId)}"]`);
       if(row)row.classList.add("selected");
+      else if(clearMissingSelection&&!append){
+        const stillExists=await fetch(`/api/email/${encodeURIComponent(selectedId)}`).then(r=>r.ok).catch(()=>false);
+        if(!stillExists&&currentEmail?.id===selectedId)clearCurrentEmailView();
+      }
     }
     return emails;
   }catch(err){setStatus("Error: "+err.message,"err");}
@@ -314,6 +323,7 @@ searchInput.addEventListener("input",()=>{
 const emailSubject=document.getElementById("email-subject"),emailMeta=document.getElementById("email-meta");
 const emailBody=document.getElementById("email-body"),responseText=document.getElementById("response-text");
 const markDoneBtn=document.getElementById("btn-mark-done");
+const markSpamBtn=document.getElementById("btn-mark-spam");
 const generateContactKbBtn=document.getElementById("btn-generate-contact-kb");
 const emailFindTodosBtn=document.getElementById("btn-email-find-todos");
 
@@ -322,6 +332,7 @@ async function openEmail(id,el){
   if(el)el.classList.add("selected");
   emailBody.textContent="Loading…";emailBody.className="";
   markDoneBtn.style.display="none";
+  markSpamBtn.style.display="none";
   generateContactKbBtn.style.display="none";
   emailFindTodosBtn.style.display="none";
   responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
@@ -331,7 +342,10 @@ async function openEmail(id,el){
     const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
     if(data.error){emailBody.textContent="Error: "+data.error;return;}
     currentEmail=data;
-    markDoneBtn.style.display=data.folder==="Finished"||data.done_at?"none":"";
+    const isLocalFinished=data.folder==="Finished"||data.done_at;
+    const isSpamFolder=/spam|junk/i.test(data.folder||"");
+    markDoneBtn.style.display=isLocalFinished?"none":"";
+    markSpamBtn.style.display=isLocalFinished||isSpamFolder?"none":"";
     generateContactKbBtn.style.display="";
     emailFindTodosBtn.style.display="";
     loadSuggestedContext(data);
@@ -353,6 +367,7 @@ async function openEmail(id,el){
 function clearCurrentEmailView(){
   currentEmail=null;currentResponse="";
   markDoneBtn.style.display="none";
+  markSpamBtn.style.display="none";
   emailFindTodosBtn.style.display="none";
   emailSubject.textContent="No message selected";emailSubject.style.color="var(--dim)";
   emailMeta.innerHTML="";
@@ -404,6 +419,33 @@ async function unarchiveEmail(emailId=currentEmail?.id,{fromList=false}={}){
 }
 
 markDoneBtn.addEventListener("click",()=>markEmailDone());
+
+async function markEmailSpam(emailId=currentEmail?.id){
+  if(!emailId)return;
+  const nextId=adjacentEmailId(emailId);
+  const ok=confirm([
+    "Move this email to the account's remote Spam/Junk folder?",
+    "",
+    "This changes the IMAP server mailbox. The message is moved, not permanently deleted.",
+  ].join("\n"));
+  if(!ok)return;
+  try{
+    markSpamBtn.disabled=true;
+    const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/spam`,{method:"POST"}).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!res.ok||!res.data.success){
+      setStatus("Spam move failed: "+(res.data.error||"?"),"err");
+      return;
+    }
+    setStatus("Moved to remote Spam/Junk folder","ok");
+    await refreshAfterEmailMove(emailId,nextId);
+  }catch(err){
+    setStatus("Spam move failed: "+err.message,"err");
+  }finally{
+    markSpamBtn.disabled=false;
+  }
+}
+
+markSpamBtn.addEventListener("click",()=>markEmailSpam());
 
 generateContactKbBtn.addEventListener("click",async()=>{
   if(!currentEmail)return;
@@ -960,6 +1002,7 @@ let settingsConfig=null;
 let llmDrafts=[];
 let selectedLlmId=null;
 let llmHealth={};
+let llmHealthCheckActive=false;
 let promptDrafts={};
 let quickTemplateDrafts=[];
 
@@ -1121,21 +1164,44 @@ function collectQuickTemplates(){
 
 function updateActiveHealthDot(){
   const dot=document.getElementById("active-llm-health");
+  if(llmHealthCheckActive){
+    dot.className="llm-health-dot testing";
+    dot.title="Testing LLM connection…";
+    return;
+  }
   const h=llmHealth[activeLlmSelect.value];
   dot.className="llm-health-dot "+healthClass(h?.ok);
   dot.title=h?.ok===true?"LLM reachable":h?.ok===false?("LLM unavailable"+(h.error?": "+h.error:"")):"LLM status unknown";
 }
 
-async function loadLlmHealth(){
+async function loadLlmHealth(llmId=""){
   try{
-    const data=await fetch("/api/llm/status").then(r=>r.json());
-    llmHealth={};
+    const qs=llmId?`?id=${encodeURIComponent(llmId)}`:"";
+    const data=await fetch(`/api/llm/status${qs}`).then(r=>r.json());
+    if(llmId)delete llmHealth[llmId];
+    else llmHealth={};
     (data.llms||[]).forEach(h=>{llmHealth[h.id]=h;});
     updateActiveHealthDot();
     renderLlmHealthList();
   }catch(e){
     updateActiveHealthDot();
   }
+}
+
+async function retestActiveLlmHealth(){
+  if(llmHealthCheckActive)return;
+  const llmId=activeLlmSelect.value;
+  if(!llmId)return;
+  const label=activeLlmSelect.options[activeLlmSelect.selectedIndex]?.text||"LLM";
+  llmHealthCheckActive=true;
+  updateActiveHealthDot();
+  setStatus(`Testing ${label}…`,"busy");
+  await loadLlmHealth(llmId);
+  llmHealthCheckActive=false;
+  updateActiveHealthDot();
+  const h=llmHealth[llmId];
+  if(h?.ok)setStatus(`${label} reachable`,"ok");
+  else setStatus(`${label} unavailable${h?.error?": "+h.error:""}`,"err");
 }
 
 function initLlmSettings(cfg){
@@ -1180,6 +1246,8 @@ activeLlmSelect.addEventListener("change",async()=>{
     }else setStatus("LLM switch failed: "+(res.error||"?"),"err");
   }catch(err){setStatus("LLM switch failed: "+err.message,"err");}
 });
+
+document.getElementById("active-llm-health").addEventListener("click",retestActiveLlmHealth);
 
 document.getElementById("cfg-llm-list").addEventListener("change",function(){
   const nextId=this.value;
@@ -1394,6 +1462,7 @@ function renderFolderPicker(folders,isSaved){
       <select class="fp-role-sel" data-name="${escHtml(f.name)}">
         <option value="inbox" ${f.role==="inbox"?"selected":""}>Inbox</option>
         <option value="sent" ${f.role==="sent"?"selected":""}>Sent</option>
+        <option value="spam" ${f.role==="spam"?"selected":""}>Spam/Junk</option>
         <option value="other" ${f.role==="other"?"selected":""}>Other</option>
       </select>
     </div>`).join("");
@@ -1480,8 +1549,10 @@ async function saveSettings(){
       // Keep inbox_folder / sent_folder for backward compat
       const inbox=selectedFolders.find(f=>f.role==="inbox");
       const sent=selectedFolders.find(f=>f.role==="sent");
+      const spam=selectedFolders.find(f=>f.role==="spam");
       if(inbox)payload.imap.inbox_folder=inbox.name;
       if(sent)payload.imap.sent_folder=sent.name;
+      if(spam)payload.imap.spam_folder=spam.name;
     }
     try{
       let res;
@@ -1534,8 +1605,8 @@ function escHtml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt
 // ─── Event wiring ─────────────────────────────────────────────────────────
 document.getElementById("btn-sync").addEventListener("click",()=>{
   if(taskPollInterval){setStatus("A task is already running","err");return;}
-  const n=accountsCache.length*3;
-  fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,()=>loadFolders())).catch(err=>setStatus("Sync error: "+err.message,"err"));
+  const n=accountsCache.length*4;
+  fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});})).catch(err=>setStatus("Sync error: "+err.message,"err"));
 });
 document.getElementById("btn-build-kb").addEventListener("click",async()=>{
   if(taskPollInterval){setStatus("A task is already running","err");return;}

@@ -295,6 +295,20 @@ class KnowledgeBuilder:
                 })
         return matches
 
+    def exact_sender_knowledge_matches_for_email(self, email_row: dict) -> list[dict]:
+        sender_addr, sender_name = self._addr((email_row or {}).get("sender", ""))
+        sender_addr = (sender_addr or "").lower()
+        if not sender_addr or "@" not in sender_addr:
+            return []
+        if not self.contact_knowledge_exists(sender_addr):
+            return []
+        return [{
+            "email": sender_addr,
+            "name": sender_name or sender_addr,
+            "file": self.contact_filename(sender_addr),
+            "match": "sender",
+        }]
+
     @staticmethod
     def _clean_generated_markdown(content: str) -> str:
         content = content or ""
@@ -475,7 +489,7 @@ class KnowledgeBuilder:
 
         sorted_contacts = sorted(
             contacts.items(), key=lambda x: len(x[1]["emails"]), reverse=True
-        )[:40]
+        )
 
         contact_results = []
         for i, (addr, data) in enumerate(sorted_contacts):

@@ -10,9 +10,51 @@ and helps you draft replies through a chat interface. **No email is ever sent au
 
 | Dependency | Notes |
 |---|---|
-| Python 3.9+ | `brew install python` |
+| Python 3.10+ | Python 3.12 is a good default on macOS |
 | An LLM backend | LM Studio (local), Ollama, LiteLLM proxy, or any OpenAI-compatible API |
 | IMAP access | Works with any IMAP server — Outlook, Gmail, Fastmail, etc. |
+
+---
+
+## Python Version
+
+The app requires **Python 3.10 or newer**. Python 3.12 is recommended because it is widely supported by current packaging tools and macOS app builds.
+
+Check your current version:
+
+```bash
+python3 --version
+```
+
+If your installed Python is too old, install a newer one and point setup at it:
+
+```bash
+# Homebrew
+brew install python@3.12
+PYTHON="$(brew --prefix python@3.12)/bin/python3.12" ./setup.sh
+```
+
+Or install Python 3.12 from [python.org](https://www.python.org/downloads/macos/) and run:
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 ./setup.sh
+```
+
+If `.venv` was already created with the wrong Python version, recreate it:
+
+```bash
+rm -rf .venv
+PYTHON="$(brew --prefix python@3.12)/bin/python3.12" ./setup.sh
+```
+
+With `pyenv`, the equivalent is:
+
+```bash
+pyenv install 3.12
+pyenv local 3.12
+rm -rf .venv
+./setup.sh
+```
 
 ---
 
@@ -44,6 +86,9 @@ git clone https://github.com/Sumidu/email-assistant && cd email-assistant
 chmod +x setup.sh run.sh
 ./setup.sh
 
+# Optional: also upgrade pip during setup
+UPGRADE_PIP=1 ./setup.sh
+
 # 3. Start the assistant
 ./run.sh
 
@@ -65,6 +110,7 @@ Key fields:
 |---|---|
 | `accounts[].imap.server` | Your IMAP hostname |
 | `accounts[].imap.sent_folder` | `"Sent Items"` (Outlook), `"Sent"` (Gmail/Fastmail). Use Settings → Discover Folders to find the exact name. |
+| `accounts[].imap.spam_folder` | Remote spam/junk folder used by the Spam action. If unset, the app tries to detect a server folder marked Junk/Spam. |
 | `accounts[].imap.fetch_limit` | Max emails to fetch per folder (default 300) |
 | `llms[].base_url` | Base URL of each OpenAI-compatible LLM backend |
 | `llms[].model` | Model identifier. For LM Studio with one model loaded, any string works. |
