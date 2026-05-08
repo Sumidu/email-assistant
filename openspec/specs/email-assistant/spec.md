@@ -4,7 +4,7 @@
 
 The Email Assistant is a local-first desktop/web application for reading synced email, generating draft replies with configurable LLM providers, and maintaining a Markdown-based knowledge base about contacts and domains.
 
-The application SHALL help the user triage, understand, archive locally, and draft responses to email. It SHALL NOT send email or mutate the remote IMAP mailbox.
+The application SHALL help the user triage, understand, archive locally, and draft responses to email. It SHALL NOT send email. It SHALL keep normal reading, syncing, finishing, and drafting local-only, with remote mutations limited to explicit user actions such as moving a message to Spam/Junk or creating Exchange tasks.
 
 ## Requirements
 
@@ -18,6 +18,13 @@ The application SHALL provide a browser-based UI served by the local Flask appli
 - **THEN** it SHALL serve the user interface on port `5100`
 - **AND** it SHALL expose API endpoints used by the frontend for email, settings, LLM, knowledge base, logs, and background task operations.
 
+#### Scenario: Start the bundled macOS application
+
+- **WHEN** the application is built as a macOS `.app` bundle
+- **THEN** it SHALL start a local Flask server in the background
+- **AND** it SHALL open the UI in a native macOS webview window
+- **AND** startup SHALL NOT require writing to iCloud knowledge files before the main window appears.
+
 #### Scenario: Preserve runtime data outside the project checkout
 
 - **WHEN** the application reads or writes persistent user data
@@ -27,6 +34,14 @@ The application SHALL provide a browser-based UI served by the local Flask appli
 - **AND** it SHALL keep logs in `~/Library/Logs/Email Assistant`
 - **AND** it SHALL keep generated knowledge base Markdown files in `~/Library/Mobile Documents/com~apple~CloudDocs/Email Assistant/Knowledge/` when iCloud Drive is available, falling back to `~/Library/Application Support/Email Assistant/Knowledge/`.
 
+#### Scenario: Export portable configuration
+
+- **WHEN** the user exports a portable configuration snapshot
+- **THEN** the application SHALL export non-secret account, provider, prompt, template, and sync configuration
+- **AND** it SHALL exclude passwords and API keys
+- **AND** it SHALL encrypt the export with a user-provided password
+- **AND** it SHALL save the encrypted export to the app's iCloud Drive folder when available, falling back to local app storage.
+
 ### Requirement: IMAP account configuration
 
 The application SHALL allow the user to configure one or more IMAP accounts.
@@ -35,6 +50,13 @@ The application SHALL allow the user to configure one or more IMAP accounts.
 
 - **WHEN** the user opens account settings
 - **THEN** the application SHALL allow the user to enter account name, email address, IMAP host, IMAP port, username, password or app password, sent folder, and sync preferences.
+
+#### Scenario: Choose account provider type
+
+- **WHEN** the user configures an account
+- **THEN** the application SHALL allow choosing a provider type such as generic IMAP, Gmail, Outlook, Exchange, or iCloud
+- **AND** it MAY suggest a provider type from the configured host or address
+- **AND** the selected provider type SHALL be available for future calendar or task integrations.
 
 #### Scenario: Discover folders
 
@@ -52,12 +74,12 @@ The application SHALL allow the user to configure one or more IMAP accounts.
 
 The application SHALL synchronize emails from configured IMAP accounts into the local SQLite database.
 
-#### Scenario: Read-only IMAP access
+#### Scenario: Read-only IMAP access by default
 
 - **WHEN** the application connects to IMAP
 - **THEN** it SHALL open folders in read-only mode
 - **AND** it SHALL NOT mark messages read
-- **AND** it SHALL NOT move, delete, archive, flag, or otherwise mutate messages on the remote server.
+- **AND** it SHALL NOT move, delete, archive, flag, or otherwise mutate messages on the remote server during normal sync, browsing, finishing, knowledge generation, drafting, or todo extraction.
 
 #### Scenario: Sync recent messages
 
@@ -80,6 +102,13 @@ The application SHALL synchronize emails from configured IMAP accounts into the 
 - **WHEN** the application has previous sync state for a folder
 - **THEN** it SHALL use message identity and sync state to fetch only new or missing messages where possible
 - **AND** it SHALL retain local metadata such as finished status when an existing email is encountered again.
+
+#### Scenario: Remove locally cached messages deleted remotely
+
+- **WHEN** a synced remote folder no longer contains a message UID that exists in the local database for that folder and UIDVALIDITY
+- **THEN** the application SHALL remove that local email record
+- **AND** it SHALL also remove locally finished copies whose original remote message disappeared
+- **AND** it SHALL update folder counts and the visible email list so deleted remote messages disappear from the UI after sync.
 
 #### Scenario: Automatic sync
 
@@ -122,9 +151,15 @@ The application SHALL provide a navigable email list grouped by local folders an
 
 #### Scenario: Show knowledge badges
 
-- **WHEN** an email sender, recipient, alias, or matching wildcard has knowledge base data
+- **WHEN** the sender of an email has an exact knowledge base entry
 - **THEN** the email list SHALL show a knowledge base badge for that email
 - **AND** the badge SHALL use the knowledge base accent color.
+
+#### Scenario: Avoid recipient-only knowledge badges
+
+- **WHEN** an email only matches knowledge for recipients, CC addresses, or unrelated participants
+- **THEN** the email list SHALL NOT show the sender-level knowledge badge
+- **AND** this badge behavior SHALL NOT prevent knowledge generation from creating entries for other relevant senders during explicit knowledge update tasks.
 
 #### Scenario: Open matching knowledge from an email badge
 
@@ -236,6 +271,12 @@ The application SHALL show the selected email and allow local-only triage action
 - **THEN** the application SHALL show subject, sender, recipients, date, and body
 - **AND** it SHALL render email content safely for viewing.
 
+#### Scenario: Open email links externally
+
+- **WHEN** the user activates a link in email content
+- **THEN** the application SHALL open the link in the system default browser
+- **AND** it SHALL NOT navigate the application webview away from the local Email Assistant UI.
+
 #### Scenario: Resize preview and AI panes
 
 - **WHEN** the user drags the divider between email preview and AI panel
@@ -259,6 +300,15 @@ The application SHALL show the selected email and allow local-only triage action
 - **WHEN** the user views a finished email
 - **THEN** the application SHALL offer an unarchive action
 - **AND** activating it SHALL remove the local finished marker and return the email to its previous local folder context where possible.
+
+#### Scenario: Move an email to remote spam
+
+- **WHEN** the user explicitly clicks the spam action for a selected email
+- **THEN** the application SHALL locate the account's configured or discovered Spam/Junk folder
+- **AND** it SHALL verify the tracked IMAP UID and folder UIDVALIDITY before moving the message
+- **AND** it SHALL move the message to the remote Spam/Junk folder using IMAP MOVE when supported
+- **AND** it SHALL remove the message from the active local UI or move it to the local spam folder if that folder is synchronized
+- **AND** it SHALL surface a clear error without deleting local data if the remote move cannot be verified.
 
 ### Requirement: Todo discovery from email
 
@@ -331,8 +381,9 @@ The application SHALL show lightweight feedback that helps the user continue pro
 #### Scenario: Show today's finished mail count
 
 - **WHEN** the main window is visible
-- **THEN** the lower-left status area SHALL show how many emails the user has marked finished today
-- **AND** the count SHALL update after finishing or unarchiving emails.
+- **THEN** the lower-left status area SHALL show how many emails the user has processed today
+- **AND** finished and spam actions SHALL contribute to the processed counter
+- **AND** the count SHALL update after finishing, unarchiving, or moving emails to spam.
 
 ### Requirement: Draft generation and chat
 
@@ -417,6 +468,13 @@ The application SHALL support multiple OpenAI-compatible LLM providers.
 - **THEN** the application SHALL show a green or red availability indicator next to each provider
 - **AND** the indicator SHALL reflect the result of the latest provider health check.
 
+#### Scenario: Retest active provider availability
+
+- **WHEN** the user clicks the availability indicator for the active LLM provider
+- **THEN** the application SHALL run a fresh health check for that provider
+- **AND** it SHALL show an intermediate testing state
+- **AND** it SHALL update the indicator and status message with the new result.
+
 ### Requirement: Knowledge base storage
 
 The application SHALL store knowledge base entries as Markdown files.
@@ -457,6 +515,12 @@ The application SHALL store knowledge base entries as Markdown files.
 - **AND** it SHALL add Obsidian wikilinks for strong mentions of known contacts in Markdown bodies
 - **AND** it SHALL avoid modifying YAML frontmatter, headings, code blocks, existing wiki links, or Markdown links
 - **AND** it SHALL skip ambiguous display names rather than link to the wrong contact.
+
+#### Scenario: Remove model reasoning from knowledge
+
+- **WHEN** knowledge content is generated, migrated, linked, or saved
+- **THEN** the application SHALL remove model reasoning fragments such as `<think>...</think>`, thinking fences, reasoning sections, and analysis tags before storing or showing the entry
+- **AND** it SHALL preserve the user-visible Markdown content that remains.
 
 ### Requirement: Knowledge base viewing and editing
 
@@ -592,6 +656,12 @@ The application SHALL show progress for long-running tasks.
 - **THEN** the application SHALL show a task progress window
 - **AND** it SHALL report task label, progress, status, and completion or error information.
 
+#### Scenario: Start sync progress minimized
+
+- **WHEN** a synchronization task starts from the main UI
+- **THEN** the task progress UI SHOULD start minimized when configured by the application
+- **AND** the minimized indicator SHALL remain visible without covering the email preview, draft, or chat input.
+
 #### Scenario: Prevent concurrent background tasks
 
 - **WHEN** one background task is already running
@@ -609,6 +679,12 @@ The application SHALL show progress for long-running tasks.
 - **WHEN** a background task completes
 - **THEN** the application SHALL show completion state
 - **AND** it SHOULD auto-close or stay minimized in a way that does not obstruct the main workflow.
+
+#### Scenario: Keep status line readable
+
+- **WHEN** a long status or error message is shown in the lower status bar
+- **THEN** the status text SHALL truncate or wrap within its allocated area
+- **AND** it SHALL NOT overlap neighboring status controls such as the processed counter or LLM selector.
 
 ### Requirement: Logs
 
@@ -716,6 +792,13 @@ The application SHALL prioritize local privacy and non-destructive behavior.
 - **WHEN** the user marks an email finished
 - **THEN** the application SHALL NOT move, delete, archive, or flag the remote IMAP message.
 
+#### Scenario: Explicit remote mutation boundaries
+
+- **WHEN** the application performs a remote mutation
+- **THEN** it SHALL only do so for a user-initiated action that clearly communicates the remote effect
+- **AND** currently permitted remote mutations SHALL be limited to moving a selected email to Spam/Junk and creating selected Exchange tasks
+- **AND** it SHALL avoid destructive remote deletes.
+
 #### Scenario: Local secrets
 
 - **WHEN** provider API keys or email passwords are stored
@@ -727,12 +810,29 @@ The application SHALL prioritize local privacy and non-destructive behavior.
 - **WHEN** email body content contains HTML
 - **THEN** the application SHALL render it in a way that avoids executing unsafe scripts or remote-control content.
 
+### Requirement: Distribution and update planning
+
+The application SHALL support maintainable local development and packaged macOS distribution.
+
+#### Scenario: Build the macOS application
+
+- **WHEN** the user runs the build script
+- **THEN** the application SHALL build a macOS `.app` bundle using the configured PyInstaller spec
+- **AND** excluded heavyweight optional dependencies SHALL NOT prevent the bundle from starting when those features are not used.
+
+#### Scenario: Track an in-app update feature
+
+- **WHEN** an in-app update checker is planned
+- **THEN** the specification and todo list SHALL describe a conservative first version that checks GitHub for a newer release or checkout state
+- **AND** standalone automatic updates SHALL require release artifacts, versioning, and checksum or signature verification before replacing local app files.
+
 ## Out of Scope
 
 The current system SHALL NOT provide the following behavior unless a future specification adds it:
 
 - Sending email through SMTP or provider APIs.
-- Mutating remote IMAP state, including remote archive, delete, move, flag, or mark-as-read operations.
-- Multi-user cloud synchronization.
+- Mutating remote IMAP state other than the explicit Spam/Junk move action.
+- Remote archive, remote delete, remote flag, or remote mark-as-read operations.
+- Multi-user cloud synchronization. iCloud storage is limited to single-user portability of knowledge files and non-secret encrypted configuration exports.
 - A hosted web service mode for remote users.
 - Guaranteed real-time push email delivery.
