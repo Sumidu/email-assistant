@@ -33,10 +33,10 @@ def reload_modules() -> None:
     resp_gen = ResponseGenerator(config)
 
 
-def sync_all(progress_callback=None) -> dict:
+def sync_all(full_resync: bool = False, progress_callback=None) -> dict:
     combined = {"success": True, "accounts": {}}
     for acct_id, fetcher in fetchers.items():
-        result = fetcher.sync(progress_callback=progress_callback)
+        result = fetcher.sync(full_resync=full_resync, progress_callback=progress_callback)
         combined["accounts"][acct_id] = result
         if not result.get("success"):
             combined["success"] = False

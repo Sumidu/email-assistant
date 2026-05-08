@@ -24,11 +24,39 @@ DEFAULT_KNOWLEDGE_DIR = (
     if ICLOUD_DRIVE_DIR.exists()
     else APP_SUPPORT_DIR / "Knowledge"
 )
+FALLBACK_KNOWLEDGE_DIRS = [
+    CLOUD_APP_DIR / "Knowledge",
+    APP_SUPPORT_DIR / "Knowledge",
+    LEGACY_DIR / "knowledge",
+]
 
 CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
 DB_PATH = APP_SUPPORT_DIR / "emails.db"
 LLM_LOG_PATH = LOG_DIR / "llm_requests.log"
-KNOWLEDGE_DIR = DEFAULT_KNOWLEDGE_DIR
+
+
+def _has_markdown_files(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    try:
+        return any(item.is_file() and item.suffix.lower() == ".md" for item in path.iterdir())
+    except OSError:
+        return False
+
+
+def resolve_knowledge_dir() -> Path:
+    """Prefer the standard KB path, unless it is empty and an older path is not."""
+    if _has_markdown_files(DEFAULT_KNOWLEDGE_DIR):
+        return DEFAULT_KNOWLEDGE_DIR
+    for path in FALLBACK_KNOWLEDGE_DIRS:
+        if path == DEFAULT_KNOWLEDGE_DIR:
+            continue
+        if _has_markdown_files(path):
+            return path
+    return DEFAULT_KNOWLEDGE_DIR
+
+
+KNOWLEDGE_DIR = resolve_knowledge_dir()
 
 
 def ensure_app_dirs() -> None:

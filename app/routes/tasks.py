@@ -14,14 +14,15 @@ def sync():
 
     body = request.get_json(silent=True) or {}
     account_id = body.get("account_id")
+    full_resync = bool(body.get("full_resync"))
 
     if account_id:
         fetcher = rt.fetchers.get(account_id)
         if not fetcher:
             return jsonify({"error": "Account not found"}), 404
-        run_background(fetcher.sync)
+        run_background(fetcher.sync, full_resync)
     else:
-        run_background(rt.sync_all)
+        run_background(rt.sync_all, full_resync)
 
     return jsonify({"status": "started"})
 

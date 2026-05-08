@@ -85,6 +85,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 #maillist-header{padding:9px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;}
 #maillist-title{color:var(--text);font-size:11px;font-weight:bold;letter-spacing:1px;flex:1;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #email-count{color:var(--dim);font-size:9.5px;flex-shrink:0;}
+#btn-finish-filtered{width:24px;height:24px;border:1px solid var(--border2);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;flex-shrink:0;transition:border-color .12s,color .12s,background .12s;}
+#btn-finish-filtered:hover{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent);}
+#btn-finish-filtered:disabled{opacity:.38;cursor:not-allowed;border-color:var(--border);color:var(--dim);background:transparent;}
 #email-list{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--dim) transparent;}
 .email-item{padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .08s;position:relative;display:flex;align-items:center;gap:8px;}
 .email-item:hover{background:var(--bg2);}
@@ -96,10 +99,12 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .ei-kb-badge:hover{background:color-mix(in srgb,var(--amber) 18%,transparent);border-color:var(--amber);}
 .email-item .ei-subj{color:var(--text);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;}
 .email-item .ei-meta{color:var(--muted);font-size:9.5px;display:flex;justify-content:space-between;}
-.ei-finish-btn{width:26px;height:26px;border:1px solid var(--border2);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;flex-shrink:0;opacity:0;transition:opacity .12s,border-color .12s,color .12s,background .12s;}
-.email-item:hover .ei-finish-btn,.ei-finish-btn:focus-visible{opacity:1;}
+.ei-actions{display:flex;gap:4px;align-items:center;flex-shrink:0;}
+.ei-finish-btn,.ei-spam-btn{width:26px;height:26px;border:1px solid var(--border2);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;flex-shrink:0;opacity:0;transition:opacity .12s,border-color .12s,color .12s,background .12s;}
+.email-item:hover .ei-finish-btn,.email-item:hover .ei-spam-btn,.ei-finish-btn:focus-visible,.ei-spam-btn:focus-visible{opacity:1;}
 .ei-finish-btn:hover{border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 10%,transparent);}
 .ei-finish-btn.unfinish:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);}
+.ei-spam-btn:hover{border-color:var(--red);color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent);}
 #load-more{padding:10px;text-align:center;color:var(--muted);font-size:10px;cursor:pointer;letter-spacing:1px;transition:color .12s;}
 #load-more:hover{color:var(--amber);}
 

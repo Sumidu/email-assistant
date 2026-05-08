@@ -86,10 +86,10 @@ Effort scale:
   - Clarification: Create a todo/reminder to respond to the selected email, ideally with source email reference and optional due date.
   - Notes: Fits well with the existing todo workflow.
 
-- [ ] Mark all mails as finished
+- [x] Mark all mails as finished
   - Category: Feature
   - Clarification: Add a bulk action for the current folder/filter with a confirmation that shows the number of affected emails.
-  - Notes: Should remain local-only and not mutate remote IMAP.
+  - Notes: Implemented as a current folder/filter bulk action. Remains local-only and does not mutate remote IMAP. Also added per-email Spam/Junk actions in the list view.
 
 - [ ] Add theme setting for system dark/light mode
   - Category: Feature / UX

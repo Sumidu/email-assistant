@@ -49,6 +49,20 @@ def unmark_email_done(email_id):
     return jsonify(result), status
 
 
+@bp.route("/emails/bulk_done", methods=["POST"])
+def bulk_mark_emails_done():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder") or "INBOX"
+    account_id = data.get("account_id") or None
+    search = data.get("q") or ""
+    if data.get("dry_run"):
+        return jsonify({
+            "success": True,
+            "count": database.count_emails_for_finish(folder, account_id=account_id, search=search),
+        })
+    return jsonify(database.mark_filtered_emails_done(folder, account_id=account_id, search=search))
+
+
 @bp.route("/email/<path:email_id>/spam", methods=["POST"])
 def mark_email_spam(email_id):
     data = database.get_email_by_id(email_id)

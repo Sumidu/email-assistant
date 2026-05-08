@@ -210,6 +210,55 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search=""):
     conn.close()
     return [dict(r) for r in rows]
 
+
+def _email_filter_where(folder: str, account_id=None, search="") -> tuple[list[str], list]:
+    where = ["folder = ?"]
+    params = [folder]
+    if account_id:
+        where.append("account_id = ?")
+        params.append(account_id)
+    search = (search or "").strip()
+    if search:
+        like = f"%{search}%"
+        where.append(
+            """(
+                subject LIKE ? COLLATE NOCASE OR
+                sender LIKE ? COLLATE NOCASE OR
+                recipients LIKE ? COLLATE NOCASE OR
+                body_text LIKE ? COLLATE NOCASE
+            )"""
+        )
+        params.extend([like, like, like, like])
+    return where, params
+
+
+def count_emails_for_finish(folder: str, account_id=None, search="") -> int:
+    conn = get_connection()
+    where, params = _email_filter_where(folder, account_id=account_id, search=search)
+    where.append("done_at IS NULL")
+    count = conn.execute(
+        f"SELECT COUNT(*) FROM emails WHERE {' AND '.join(where)}",
+        params,
+    ).fetchone()[0]
+    conn.close()
+    return int(count or 0)
+
+
+def mark_filtered_emails_done(folder: str, account_id=None, search="") -> dict:
+    conn = get_connection()
+    where, params = _email_filter_where(folder, account_id=account_id, search=search)
+    where.append("done_at IS NULL")
+    ts = datetime.now().isoformat()
+    cur = conn.execute(
+        f"""UPDATE emails
+            SET folder = ?, done_at = ?, original_folder = COALESCE(original_folder, ?)
+            WHERE {' AND '.join(where)}""",
+        [FINISHED_FOLDER, ts, folder, *params],
+    )
+    conn.commit()
+    conn.close()
+    return {"success": True, "count": int(cur.rowcount or 0), "folder": FINISHED_FOLDER}
+
 def get_email_by_id(email_id):
     conn = get_connection()
     row = conn.execute("SELECT * FROM emails WHERE id = ?", (email_id,)).fetchone()

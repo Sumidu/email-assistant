@@ -200,6 +200,7 @@ function folderDisplayName(n){return n.replace(/^(inbox[./])/i,"").trim()||n;}
 // ─── Load folders ─────────────────────────────────────────────────────────
 const folderListEl=document.getElementById("folder-list"),maillistTitle=document.getElementById("maillist-title");
 const emailCount=document.getElementById("email-count"),emailListEl=document.getElementById("email-list"),loadMoreBtn=document.getElementById("load-more");
+const finishFilteredBtn=document.getElementById("btn-finish-filtered");
 const searchInput=document.getElementById("search-input");
 
 async function loadFolders(){
@@ -239,6 +240,7 @@ function selectFolder(folder,accountId,el){
   if(el)el.classList.add("selected");
   currentFolder=folder;currentAccountId=accountId;emailOffset=0;
   maillistTitle.textContent=folderDisplayName(folder).toUpperCase();
+  finishFilteredBtn.disabled=folder==="Finished";
   searchInput.value="";loadEmailList();
 }
 
@@ -314,17 +316,68 @@ function renderEmailList(emails,append=false){
     const primaryKb=matches[0]?.file||"";
     const badge=matches.length?`<button class="ei-kb-badge" data-kb-file="${escHtml(primaryKb)}" title="${escHtml(badgeTitle)}">&#9670; KB</button>`:"";
     const isFinished=(e.folder||currentFolder)==="Finished";
-    const action=isFinished
+    const isSpamFolder=/spam|junk/i.test(e.folder||currentFolder||"");
+    const finishAction=isFinished
       ?`<button class="ei-finish-btn unfinish" data-unfinish-id="${escHtml(e.id)}" title="Unarchive">&#8634;</button>`
       :`<button class="ei-finish-btn" data-finish-id="${escHtml(e.id)}" title="Done">&#10003;</button>`;
-    div.innerHTML=`<div class="ei-main"><div class="ei-from"><span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span></div></div>${action}`;
+    const spamAction=!isFinished&&!isSpamFolder
+      ?`<button class="ei-spam-btn" data-spam-id="${escHtml(e.id)}" title="Move to Spam/Junk">&#128683;</button>`
+      :"";
+    div.innerHTML=`<div class="ei-main"><div class="ei-from"><span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span></div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
     div.addEventListener("click",()=>openEmail(e.id,div));
     div.querySelector("[data-kb-file]")?.addEventListener("click",ev=>{ev.stopPropagation();openKnowledge(ev.currentTarget.dataset.kbFile);});
     div.querySelector("[data-finish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailDone(e.id,{fromList:true});});
     div.querySelector("[data-unfinish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();unarchiveEmail(e.id,{fromList:true});});
+    div.querySelector("[data-spam-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailSpam(e.id,{fromList:true});});
     emailListEl.appendChild(div);
   });
 }
+
+function currentEmailListPayload(extra={}){
+  return {
+    folder:currentFolder||"INBOX",
+    account_id:currentAccountId||"",
+    q:searchInput.value.trim(),
+    ...extra,
+  };
+}
+
+async function finishFilteredEmails(){
+  if(!currentFolder||currentFolder==="Finished")return;
+  try{
+    finishFilteredBtn.disabled=true;
+    const preview=await fetch("/api/emails/bulk_done",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(currentEmailListPayload({dry_run:true})),
+    }).then(r=>r.json());
+    const count=preview.count||0;
+    if(!count){setStatus("No unfinished messages match this folder/filter","err");return;}
+    const label=folderDisplayName(currentFolder);
+    const q=searchInput.value.trim();
+    const msg=[
+      `Mark ${count} email${count===1?"":"s"} as finished?`,
+      "",
+      q?`Folder: ${label}, search: "${q}"`:`Folder: ${label}`,
+      "This is local-only and does not mutate the remote IMAP mailbox.",
+    ].join("\n");
+    if(!confirm(msg))return;
+    const res=await fetch("/api/emails/bulk_done",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(currentEmailListPayload()),
+    }).then(r=>r.json());
+    if(!res.success){setStatus("Bulk finish failed: "+(res.error||"?"),"err");return;}
+    setStatus(`Marked ${res.count||0} email${res.count===1?"":"s"} as finished`,"ok");
+    refreshFinishedToday();
+    clearCurrentEmailView();
+    await loadFolders();
+    if(currentFolder)await loadEmailList(false,{clearMissingSelection:true});
+  }catch(err){setStatus("Bulk finish failed: "+err.message,"err");}
+  finally{finishFilteredBtn.disabled=currentFolder==="Finished";}
+}
+
+finishFilteredBtn.addEventListener("click",finishFilteredEmails);
 
 searchInput.addEventListener("input",()=>{
   clearTimeout(searchTimer);
@@ -1800,8 +1853,17 @@ function escHtml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt
 // ─── Event wiring ─────────────────────────────────────────────────────────
 document.getElementById("btn-sync").addEventListener("click",()=>{
   if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const msg=[
+    "Run a complete mail resync?",
+    "",
+    "This ignores the saved IMAP sync position and scans every configured remote folder again.",
+    "Existing local Finished state is preserved, but the sync may take a while.",
+  ].join("\n");
+  if(!confirm(msg))return;
   const n=accountsCache.length*4;
-  fetch("/api/sync",{method:"POST"}).then(()=>startTaskPoll("Sync All",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});})).catch(err=>setStatus("Sync error: "+err.message,"err"));
+  fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({full_resync:true})})
+    .then(()=>startTaskPoll("Full Resync",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});}))
+    .catch(err=>setStatus("Sync error: "+err.message,"err"));
 });
 document.getElementById("btn-build-kb").addEventListener("click",async()=>{
   if(!requireActiveLlm())return;

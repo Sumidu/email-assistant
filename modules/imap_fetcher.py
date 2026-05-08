@@ -151,7 +151,7 @@ class IMAPFetcher:
                 continue
         return result
 
-    def _fetch_folder(self, conn, folder_name: str, limit: int) -> dict:
+    def _fetch_folder(self, conn, folder_name: str, limit: int, full_resync: bool = False) -> dict:
         try:
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
             if status != "OK":
@@ -166,11 +166,11 @@ class IMAPFetcher:
         removed = 0
         if remote_uids is not None:
             removed = database.remove_missing_remote_emails(self.account_id, folder_name, uidvalidity, remote_uids)
-        mode = self.imap_cfg.get("sync_mode", "recent")
+        mode = "all" if full_resync else self.imap_cfg.get("sync_mode", "recent")
         since_date = self.imap_cfg.get("sync_since", "")
         state = database.get_sync_state(self.account_id, folder_name)
         last_seen_uid = 0
-        if state and state.get("uidvalidity") == uidvalidity:
+        if not full_resync and state and state.get("uidvalidity") == uidvalidity:
             last_seen_uid = int(state.get("last_seen_uid") or 0)
 
         uids = self._search_uids(conn, mode, limit, since_date, last_seen_uid)
@@ -380,11 +380,12 @@ class IMAPFetcher:
             {"name": self.imap_cfg.get("sent_folder", "Sent Items"), "role": "sent"},
         ]
 
-    def sync(self, progress_callback=None) -> dict:
-        results: dict = {"folders": {}}
+    def sync(self, full_resync: bool = False, progress_callback=None) -> dict:
+        results: dict = {"folders": {}, "full_resync": full_resync}
         try:
             if progress_callback:
-                progress_callback(f"[{self.account_name}] Connecting…")
+                prefix = "Full resync" if full_resync else "Sync"
+                progress_callback(f"[{self.account_name}] {prefix}: connecting…")
             conn = self._connect()
 
             limit   = int(self.imap_cfg.get("fetch_limit", 300))
@@ -393,8 +394,9 @@ class IMAPFetcher:
             for f in folders:
                 fname = f["name"]
                 if progress_callback:
-                    progress_callback(f"[{self.account_name}] Fetching «{fname}»…")
-                folder_result = self._fetch_folder(conn, fname, limit)
+                    action = "Rescanning all messages in" if full_resync else "Fetching"
+                    progress_callback(f"[{self.account_name}] {action} «{fname}»…")
+                folder_result = self._fetch_folder(conn, fname, limit, full_resync=full_resync)
                 results["folders"][fname] = folder_result
                 if progress_callback and folder_result.get("removed"):
                     progress_callback(

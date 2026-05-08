@@ -26,10 +26,18 @@ METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
 FRONTMATTER_MARKER = "---"
 
 
+def _set_knowledge_dir(path) -> None:
+    global KNOWLEDGE_DIR, PINS_PATH, METADATA_PATH
+    KNOWLEDGE_DIR = str(path)
+    PINS_PATH = os.path.join(KNOWLEDGE_DIR, "_pinned.json")
+    METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
+
+
 class KnowledgeBuilder:
     def __init__(self, config: dict):
         self.config = config
         self._last_llm = None
+        _set_knowledge_dir(paths.resolve_knowledge_dir())
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 
     # ---- LLM call ----------------------------------------------------------
@@ -1114,16 +1122,26 @@ class KnowledgeBuilder:
         pinned = set(self.get_pinned())
         metadata = self._load_metadata()
         result = []
+        if not os.path.isdir(KNOWLEDGE_DIR):
+            return result
         for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
             if not fname.endswith(".md"):
                 continue
             fpath = os.path.join(KNOWLEDGE_DIR, fname)
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-            file_meta, body = self._split_frontmatter(content)
+            read_error = ""
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                file_meta, body = self._split_frontmatter(content)
+            except (OSError, UnicodeDecodeError) as exc:
+                read_error = str(exc)
+                file_meta = {}
+                body = f"Could not read this knowledge file:\n\n{read_error}"
             meta = metadata.get(fname, {})
             merged_meta = dict(file_meta)
             merged_meta.update(meta)
+            if read_error:
+                merged_meta["read_error"] = read_error
             result.append({"name": fname, "path": fpath, "content": body,
                             "pinned": fname in pinned,
                             "metadata": merged_meta})

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='icloud-config-20260508') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='full-resync-20260508') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -13,7 +13,7 @@
     <div class="logo">Mail<span> // local</span></div>
     <div id="search-wrap"><span class="ico">&#128269;</span><input id="search-input" type="text" placeholder="Search subject / sender…" autocomplete="off"/></div>
     <div id="header-actions">
-      <button class="hbtn accent" id="btn-sync">&#8635; Sync All</button>
+      <button class="hbtn accent" id="btn-sync" title="Scan all configured remote folders again">&#8635; Full Resync</button>
       <div id="todo-finder-wrap">
         <button class="hbtn todo-action" id="btn-find-todos">&#9745; Todos</button>
       </div>
@@ -32,7 +32,11 @@
   <button id="folders-rail" title="Show folders">&#128193;</button>
 
   <section id="maillist">
-    <div id="maillist-header"><span id="maillist-title">Inbox</span><span id="email-count">—</span></div>
+    <div id="maillist-header">
+      <span id="maillist-title">Inbox</span>
+      <span id="email-count">—</span>
+      <button id="btn-finish-filtered" title="Mark all emails in the current folder/filter as done">&#10003;</button>
+    </div>
     <div id="email-list"><div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Select a folder.</div></div>
     <div id="load-more" style="display:none;">&#8227; Load more…</div>
   </section>
@@ -482,6 +486,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='icloud-config-20260508') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='full-resync-20260508') }}"></script>
 </body>
 </html>

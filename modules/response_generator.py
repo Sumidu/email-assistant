@@ -20,7 +20,8 @@ import requests
 from app import llm_providers
 from app import prompt_defaults
 
-from .knowledge_builder import KnowledgeBuilder, KNOWLEDGE_DIR
+from . import knowledge_builder
+from .knowledge_builder import KnowledgeBuilder
 from . import calendar_store
 from . import llm_logger
 
@@ -130,7 +131,7 @@ class ResponseGenerator:
         """Execute a KB query and return the result as a string to inject."""
         if query["action"] == "list":
             try:
-                files = sorted(os.listdir(KNOWLEDGE_DIR))
+                files = sorted(os.listdir(knowledge_builder.KNOWLEDGE_DIR))
                 md_files = [f for f in files if f.endswith(".md")]
                 if not md_files:
                     return "<kb_result>Knowledge base is empty.</kb_result>"
