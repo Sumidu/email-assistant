@@ -14,12 +14,14 @@ def emails():
     account_id = request.args.get("account_id") or None
     folder = request.args.get("folder") or "INBOX"
     search = request.args.get("q") or ""
+    importance = request.args.get("importance") or ""
     rows = database.get_emails(
         folder=folder,
         limit=limit,
         offset=offset,
         account_id=account_id,
         search=search,
+        importance=importance,
     )
     if rt.kb:
         for row in rows:
@@ -55,12 +57,13 @@ def bulk_mark_emails_done():
     folder = data.get("folder") or "INBOX"
     account_id = data.get("account_id") or None
     search = data.get("q") or ""
+    importance = data.get("importance") or ""
     if data.get("dry_run"):
         return jsonify({
             "success": True,
-            "count": database.count_emails_for_finish(folder, account_id=account_id, search=search),
+            "count": database.count_emails_for_finish(folder, account_id=account_id, search=search, importance=importance),
         })
-    return jsonify(database.mark_filtered_emails_done(folder, account_id=account_id, search=search))
+    return jsonify(database.mark_filtered_emails_done(folder, account_id=account_id, search=search, importance=importance))
 
 
 @bp.route("/email/<path:email_id>/spam", methods=["POST"])

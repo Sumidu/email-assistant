@@ -24,6 +24,8 @@ KNOWLEDGE_DIR = str(paths.KNOWLEDGE_DIR)
 PINS_PATH = os.path.join(KNOWLEDGE_DIR, "_pinned.json")
 METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
 FRONTMATTER_MARKER = "---"
+PEOPLE_DIR_NAME = "People"
+OTHER_DIR_NAME = "Other"
 
 
 def _set_knowledge_dir(path) -> None:
@@ -39,6 +41,78 @@ class KnowledgeBuilder:
         self._last_llm = None
         _set_knowledge_dir(paths.resolve_knowledge_dir())
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+        self._ensure_knowledge_dirs()
+        self._migrate_knowledge_folders()
+
+    def _ensure_knowledge_dirs(self) -> None:
+        os.makedirs(os.path.join(KNOWLEDGE_DIR, PEOPLE_DIR_NAME), exist_ok=True)
+        os.makedirs(os.path.join(KNOWLEDGE_DIR, OTHER_DIR_NAME), exist_ok=True)
+
+    @staticmethod
+    def _knowledge_category(filename: str, metadata: dict | None = None, content: str = "") -> str:
+        metadata = metadata or {}
+        fname = os.path.basename(filename)
+        email_value = metadata.get("email") or KnowledgeBuilder._infer_email_from_filename(fname)
+        aliases = metadata.get("aliases") if isinstance(metadata.get("aliases"), list) else []
+        source = metadata.get("source", "")
+        if source == "contact_profile" or aliases or (email_value and fname != "_writing_style.md"):
+            return PEOPLE_DIR_NAME
+        if not content and fname.startswith("_"):
+            return OTHER_DIR_NAME
+        if content:
+            frontmatter, _ = KnowledgeBuilder._split_frontmatter(content)
+            if frontmatter.get("type") == "contact" or frontmatter.get("email"):
+                return PEOPLE_DIR_NAME
+        return OTHER_DIR_NAME
+
+    def _knowledge_path(self, filename: str, category: str | None = None) -> str:
+        fname = os.path.basename(filename)
+        categories = [category] if category else [PEOPLE_DIR_NAME, OTHER_DIR_NAME, ""]
+        for cat in categories:
+            fpath = os.path.join(KNOWLEDGE_DIR, cat, fname) if cat else os.path.join(KNOWLEDGE_DIR, fname)
+            if os.path.exists(fpath):
+                return fpath
+        target = category or OTHER_DIR_NAME
+        return os.path.join(KNOWLEDGE_DIR, target, fname)
+
+    def _knowledge_files(self) -> list[str]:
+        files = []
+        seen = set()
+        for cat in (PEOPLE_DIR_NAME, OTHER_DIR_NAME, ""):
+            directory = os.path.join(KNOWLEDGE_DIR, cat) if cat else KNOWLEDGE_DIR
+            if not os.path.isdir(directory):
+                continue
+            for fname in sorted(os.listdir(directory)):
+                if fname.endswith(".md") and fname not in seen:
+                    files.append(fname)
+                    seen.add(fname)
+        return files
+
+    def _knowledge_file_exists(self, filename: str) -> bool:
+        return os.path.exists(self._knowledge_path(filename))
+
+    def _migrate_knowledge_folders(self) -> None:
+        metadata = {}
+        if os.path.exists(METADATA_PATH):
+            try:
+                with open(METADATA_PATH, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+            except Exception:
+                metadata = {}
+        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+            src = os.path.join(KNOWLEDGE_DIR, fname)
+            if not os.path.isfile(src) or not fname.endswith(".md"):
+                continue
+            try:
+                with open(src, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                content = ""
+            category = self._knowledge_category(fname, metadata.get(fname, {}), content)
+            dst = os.path.join(KNOWLEDGE_DIR, category, fname)
+            if os.path.exists(dst):
+                continue
+            os.replace(src, dst)
 
     # ---- LLM call ----------------------------------------------------------
 
@@ -96,10 +170,10 @@ class KnowledgeBuilder:
     def _merge_frontmatter_metadata(self, metadata: dict) -> dict:
         if not os.path.isdir(KNOWLEDGE_DIR):
             return metadata
-        for fname in os.listdir(KNOWLEDGE_DIR):
+        for fname in self._knowledge_files():
             if not fname.endswith(".md"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     frontmatter, _ = self._split_frontmatter(f.read())
@@ -119,6 +193,7 @@ class KnowledgeBuilder:
 
     def _save_metadata(self, metadata: dict) -> None:
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+        self._ensure_knowledge_dirs()
         with open(METADATA_PATH, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, sort_keys=True)
 
@@ -134,10 +209,10 @@ class KnowledgeBuilder:
         metadata = self._load_metadata()
         updated = 0
         metadata_changed = False
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     old = f.read()
@@ -233,10 +308,10 @@ class KnowledgeBuilder:
     def _contact_link_index(self) -> list[dict]:
         metadata = self._load_metadata()
         raw_index = []
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md") or fname.startswith("_"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     frontmatter, body = self._split_frontmatter(f.read())
@@ -280,10 +355,10 @@ class KnowledgeBuilder:
     def _ambiguous_link_labels(self) -> set[str]:
         metadata = self._load_metadata()
         labels = {}
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md") or fname.startswith("_"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     frontmatter, body = self._split_frontmatter(f.read())
@@ -368,13 +443,13 @@ class KnowledgeBuilder:
         index = self._contact_link_index()
         ambiguous_labels = self._ambiguous_link_labels()
         if update_all or filenames is None:
-            targets = [f for f in os.listdir(KNOWLEDGE_DIR) if f.endswith(".md")]
+            targets = self._knowledge_files()
         else:
             targets = [os.path.basename(f) for f in filenames if str(f or "").endswith(".md")]
         metadata = self._load_metadata()
         updated = []
         for fname in sorted(set(targets)):
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             if not fname.endswith(".md") or not os.path.exists(fpath):
                 continue
             try:
@@ -515,7 +590,7 @@ class KnowledgeBuilder:
         fname = os.path.basename(filename)
         if not fname.endswith(".md"):
             return
-        fpath = os.path.join(KNOWLEDGE_DIR, fname)
+        fpath = self._knowledge_path(fname)
         if not os.path.exists(fpath):
             return
         metadata = metadata or self._load_metadata().get(fname, self._metadata_template("manual"))
@@ -567,7 +642,7 @@ class KnowledgeBuilder:
                 continue
             patterns = self._normalize_match_patterns(meta.get("match_patterns", []))
             if any(self._pattern_matches_address(pattern, addr) for pattern in patterns):
-                if os.path.exists(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))):
+                if self._knowledge_file_exists(fname):
                     matches.append(os.path.basename(fname))
         return matches
 
@@ -577,7 +652,7 @@ class KnowledgeBuilder:
         matches = []
         for fname, meta in metadata.items():
             aliases = self._normalize_aliases(meta.get("aliases", []))
-            if addr in aliases and os.path.exists(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))):
+            if addr in aliases and self._knowledge_file_exists(fname):
                 matches.append(os.path.basename(fname))
         return matches
 
@@ -681,7 +756,7 @@ class KnowledgeBuilder:
     def contact_knowledge_exists(self, addr: str) -> bool:
         if not addr or "@" not in addr:
             return False
-        return os.path.exists(os.path.join(KNOWLEDGE_DIR, self.contact_filename(addr)))
+        return self._knowledge_file_exists(self.contact_filename(addr))
 
     def contact_for_email(self, email_row: dict) -> dict:
         if not email_row:
@@ -798,10 +873,10 @@ class KnowledgeBuilder:
             return {"success": True, "updated": 0}
         all_metadata = self._load_metadata()
         updated = []
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     original = f.read()
@@ -840,7 +915,7 @@ class KnowledgeBuilder:
         )
         try:
             content = self._clean_generated_markdown(self._call_llm(system, user, max_tokens=2500))
-            path = os.path.join(KNOWLEDGE_DIR, "_writing_style.md")
+            path = self._knowledge_path("_writing_style.md", OTHER_DIR_NAME)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"# Writing Style Guide\n\n")
                 f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M}*\n\n")
@@ -884,7 +959,7 @@ class KnowledgeBuilder:
         try:
             content = self._clean_generated_markdown(self._call_llm(system, user, max_tokens=1200))
             fname = self._safe_filename(addr) + ".md"
-            path  = os.path.join(KNOWLEDGE_DIR, fname)
+            path  = self._knowledge_path(fname, PEOPLE_DIR_NAME)
             existed = os.path.exists(path)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(f"# Contact: {data.get('name', addr)}\n\n")
@@ -1035,30 +1110,28 @@ class KnowledgeBuilder:
 
         # Always load pinned files first
         for fname in self.get_pinned():
-            fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))
+            fpath = self._knowledge_path(fname)
             if os.path.exists(fpath) and fpath not in loaded_paths:
                 with open(fpath, "r", encoding="utf-8") as f:
                     knowledge.append((fname.replace(".md", "").replace("_", " ").title(), self._strip_frontmatter(f.read())))
                 loaded_paths.add(fpath)
 
         # Writing style (unless already pinned)
-        style_path = os.path.join(KNOWLEDGE_DIR, "_writing_style.md")
+        style_path = self._knowledge_path("_writing_style.md")
         if os.path.exists(style_path) and style_path not in loaded_paths:
             with open(style_path, "r", encoding="utf-8") as f:
                 knowledge.append(("My Writing Style", self._strip_frontmatter(f.read())))
             loaded_paths.add(style_path)
 
         # Contact profile
-        contact_path = os.path.join(
-            KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"
-        )
+        contact_path = self._knowledge_path(self._safe_filename(sender_email.lower()) + ".md")
         if os.path.exists(contact_path) and contact_path not in loaded_paths:
             with open(contact_path, "r", encoding="utf-8") as f:
                 knowledge.append(("Contact Profile", self._strip_frontmatter(f.read())))
             loaded_paths.add(contact_path)
 
         for fname, match_type in self._metadata_files_for_address(sender_email):
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             if os.path.exists(fpath) and fpath not in loaded_paths:
                 with open(fpath, "r", encoding="utf-8") as f:
                     label = fname.replace(".md", "").replace("_", " ").title()
@@ -1073,18 +1146,14 @@ class KnowledgeBuilder:
         people mentioned in the email (matched by name appearing in filename
         or the first 400 chars of a contact file)."""
         knowledge = self.get_knowledge_for_sender(sender_email)
-        loaded_paths = {os.path.join(KNOWLEDGE_DIR, f) for f in os.listdir(KNOWLEDGE_DIR)
-                        if os.path.join(KNOWLEDGE_DIR, f) in
-                        {os.path.join(KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"),
-                         os.path.join(KNOWLEDGE_DIR, "_writing_style.md")}}
         # build set of loaded paths from what get_knowledge_for_sender returned
         loaded_paths = set()
         for fname in self.get_pinned():
-            loaded_paths.add(os.path.join(KNOWLEDGE_DIR, os.path.basename(fname)))
-        loaded_paths.add(os.path.join(KNOWLEDGE_DIR, "_writing_style.md"))
-        loaded_paths.add(os.path.join(KNOWLEDGE_DIR, self._safe_filename(sender_email.lower()) + ".md"))
+            loaded_paths.add(self._knowledge_path(fname))
+        loaded_paths.add(self._knowledge_path("_writing_style.md"))
+        loaded_paths.add(self._knowledge_path(self._safe_filename(sender_email.lower()) + ".md"))
         for fname, _ in self._metadata_files_for_address(sender_email):
-            loaded_paths.add(os.path.join(KNOWLEDGE_DIR, fname))
+            loaded_paths.add(self._knowledge_path(fname))
 
         # Extract candidate names: capitalised words 3+ chars from subject + first 1500 chars of body
         text = f"{subject} {body[:1500]}"
@@ -1096,10 +1165,10 @@ class KnowledgeBuilder:
         if not candidates:
             return knowledge
 
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md") or fname.startswith("_"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             if fpath in loaded_paths:
                 continue
             fname_lower = fname.lower()
@@ -1124,11 +1193,12 @@ class KnowledgeBuilder:
         result = []
         if not os.path.isdir(KNOWLEDGE_DIR):
             return result
-        for fname in sorted(os.listdir(KNOWLEDGE_DIR)):
+        for fname in sorted(self._knowledge_files()):
             if not fname.endswith(".md"):
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, fname)
+            fpath = self._knowledge_path(fname)
             read_error = ""
+            content = ""
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -1142,7 +1212,9 @@ class KnowledgeBuilder:
             merged_meta.update(meta)
             if read_error:
                 merged_meta["read_error"] = read_error
+            category = self._knowledge_category(fname, merged_meta, content)
             result.append({"name": fname, "path": fpath, "content": body,
+                            "category": "people" if category == PEOPLE_DIR_NAME else "other",
                             "pinned": fname in pinned,
                             "metadata": merged_meta})
         return result
@@ -1154,7 +1226,7 @@ class KnowledgeBuilder:
         seen = set()
 
         def _add(fname):
-            if fname not in seen and os.path.exists(os.path.join(KNOWLEDGE_DIR, fname)):
+            if fname not in seen and self._knowledge_file_exists(fname):
                 suggested.append(fname)
                 seen.add(fname)
 
@@ -1171,7 +1243,7 @@ class KnowledgeBuilder:
         return suggested
 
     def load_knowledge_file(self, filename: str):
-        fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(filename))
+        fpath = self._knowledge_path(filename)
         if not fpath.endswith(".md") or not os.path.exists(fpath):
             return None
         with open(fpath, "r", encoding="utf-8") as f:
@@ -1181,9 +1253,9 @@ class KnowledgeBuilder:
         if not filename.endswith(".md"):
             filename += ".md"
         filename = self._safe_filename(filename.replace(".md", "")) + ".md"
-        fpath = os.path.join(KNOWLEDGE_DIR, filename)
-        existed = os.path.exists(fpath)
         metadata = self._load_metadata()
+        existing_path = self._knowledge_path(filename)
+        existed = os.path.exists(existing_path)
         if source != "manual":
             metadata[filename] = self._current_llm_metadata(source)
         elif not existed:
@@ -1194,6 +1266,11 @@ class KnowledgeBuilder:
         if aliases is not None:
             metadata.setdefault(filename, self._metadata_template("manual"))
             metadata[filename]["aliases"] = self._normalize_aliases(aliases)
+        category = self._knowledge_category(filename, metadata.get(filename, {}), content)
+        fpath = self._knowledge_path(filename, category)
+        existed = os.path.exists(fpath)
+        if existed is False and existing_path != fpath and os.path.exists(existing_path):
+            os.remove(existing_path)
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(self._compose_markdown(filename, content, metadata.get(filename, {})))
         self._save_metadata(metadata)
@@ -1207,15 +1284,18 @@ class KnowledgeBuilder:
         new_name = self._safe_filename(new_filename.replace(".md", "")) + ".md"
         if old_name == new_name:
             return {"success": True, "name": old_name}
-        old_path = os.path.join(KNOWLEDGE_DIR, old_name)
-        new_path = os.path.join(KNOWLEDGE_DIR, new_name)
+        old_path = self._knowledge_path(old_name)
         if not old_path.endswith(".md") or not os.path.exists(old_path):
             return {"success": False, "error": "File not found"}
+        with open(old_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        metadata = self._load_metadata()
+        category = self._knowledge_category(new_name, metadata.get(old_name, {}), content)
+        new_path = self._knowledge_path(new_name, category)
         if os.path.exists(new_path):
             return {"success": False, "error": "Target name already exists"}
         os.rename(old_path, new_path)
 
-        metadata = self._load_metadata()
         if old_name in metadata:
             metadata[new_name] = metadata.pop(old_name)
             self._save_metadata(metadata)
@@ -1231,8 +1311,8 @@ class KnowledgeBuilder:
         source_name = os.path.basename(source)
         if target_name == source_name:
             return {"success": False, "error": "Choose two different entries"}
-        target_path = os.path.join(KNOWLEDGE_DIR, target_name)
-        source_path = os.path.join(KNOWLEDGE_DIR, source_name)
+        target_path = self._knowledge_path(target_name)
+        source_path = self._knowledge_path(source_name)
         if not target_path.endswith(".md") or not os.path.exists(target_path):
             return {"success": False, "error": "Target file not found"}
         if not source_path.endswith(".md") or not os.path.exists(source_path):
@@ -1272,7 +1352,7 @@ class KnowledgeBuilder:
         return {"success": True, "target": target_name, "removed": source_name}
 
     def delete_knowledge_file(self, filename: str) -> dict:
-        fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(filename))
+        fpath = self._knowledge_path(filename)
         if not fpath.endswith(".md") or not os.path.exists(fpath):
             return {"success": False, "error": "File not found"}
         os.remove(fpath)
@@ -1285,7 +1365,7 @@ class KnowledgeBuilder:
         for fname, meta in list(metadata.items()):
             if meta.get("llm_id") != llm_id:
                 continue
-            fpath = os.path.join(KNOWLEDGE_DIR, os.path.basename(fname))
+            fpath = self._knowledge_path(fname)
             if fpath.endswith(".md") and os.path.exists(fpath):
                 os.remove(fpath)
                 deleted.append(fname)

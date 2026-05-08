@@ -36,9 +36,13 @@ jobs:
           source .venv/bin/activate
           ./build_app.sh
 
-      - name: Create DMG
+      - name: Create DMG with Applications symlink
         run: |
-          hdiutil create -volname "Email Assistant" -srcfolder "dist/Email Assistant.app" -ov -format UDZO "dist/EmailAssistant.dmg"
+          mkdir -p dmg_temp
+          cp -R "dist/Email Assistant.app" dmg_temp/
+          ln -sf /Applications dmg_temp/Applications
+          hdiutil create -volname "Email Assistant" -srcfolder dmg_temp -ov -format UDZO "dist/EmailAssistant.dmg"
+          rm -rf dmg_temp
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -202,6 +202,7 @@ const folderListEl=document.getElementById("folder-list"),maillistTitle=document
 const emailCount=document.getElementById("email-count"),emailListEl=document.getElementById("email-list"),loadMoreBtn=document.getElementById("load-more");
 const finishFilteredBtn=document.getElementById("btn-finish-filtered");
 const searchInput=document.getElementById("search-input");
+const importanceFilter=document.getElementById("importance-filter");
 
 async function loadFolders(){
   try{
@@ -254,6 +255,31 @@ function syncAccount(accountId){
     .catch(err=>setStatus("Sync error: "+err.message,"err"));
 }
 
+function syncAllAccounts(){
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const n=Math.max(1,accountsCache.length)*4;
+  fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})})
+    .then(()=>startTaskPoll("Sync",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});}))
+    .catch(err=>setStatus("Sync error: "+err.message,"err"));
+}
+
+function fullResyncAccount(accountId){
+  if(taskPollInterval){setStatus("A task is already running","err");return;}
+  const acct=accountsCache.find(a=>a.id===accountId);
+  if(!acct){setStatus("Save the account before running a full resync","err");return;}
+  const msg=[
+    `Run a full resync for "${acct.name}"?`,
+    "",
+    "This ignores the saved IMAP sync position and scans every configured remote folder for this account again.",
+    "Existing local Finished state is preserved, but the sync may take a while.",
+  ].join("\n");
+  if(!confirm(msg))return;
+  const folders=(acct?.imap?.sync_folders||[]).length||2;
+  fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_id:accountId,full_resync:true})})
+    .then(()=>startTaskPoll("Full resync "+acct.name,folders*4,async()=>{await loadFolders();await loadAccountsForSettings();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});}))
+    .catch(err=>setStatus("Full resync error: "+err.message,"err"));
+}
+
 function setupAutoSyncTimer(){
   clearInterval(autoSyncTimer);
   autoSyncTimer=setInterval(()=>{
@@ -284,10 +310,12 @@ async function loadEmailList(append=false,{preserveSelection=false,clearMissingS
       account_id:currentAccountId||"",
     });
     if(q)qs.set("q",q);
+    if(importanceFilter.value)qs.set("importance",importanceFilter.value);
     const emails=await fetch(`/api/emails?${qs.toString()}`).then(r=>r.json());
     if(!append)allEmailsLocal=emails;else allEmailsLocal=allEmailsLocal.concat(emails);
     const hasMore=emails.length>=PAGE_SIZE;
-    emailCount.textContent=q
+    const filtered=q||importanceFilter.value;
+    emailCount.textContent=filtered
       ?`${allEmailsLocal.length}${hasMore?"+":""} found`
       :(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
     renderEmailList(emails,append);
@@ -311,6 +339,7 @@ function renderEmailList(emails,append=false){
   }
   emails.forEach(e=>{
     const div=document.createElement("div");div.className="email-item";div.dataset.id=e.id;
+    if(e.is_read===0||e.is_read===false)div.classList.add("unread");
     const matches=e.knowledge_matches||[];
     const badgeTitle=matches.length?`Knowledge: ${matches.map(m=>m.email||m.name).join(", ")}`:"";
     const primaryKb=matches[0]?.file||"";
@@ -323,7 +352,9 @@ function renderEmailList(emails,append=false){
     const spamAction=!isFinished&&!isSpamFolder
       ?`<button class="ei-spam-btn" data-spam-id="${escHtml(e.id)}" title="Move to Spam/Junk">&#128683;</button>`
       :"";
-    div.innerHTML=`<div class="ei-main"><div class="ei-from"><span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span></div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
+    const readFlag=(e.is_read===0||e.is_read===false)?'<span class="ei-unread-dot" title="Unread"></span>':"";
+    const importance=e.email_importance?`<span class="ei-importance" title="${e.email_importance} star importance">${"★".repeat(Number(e.email_importance))}</span>`:"";
+    div.innerHTML=`<div class="ei-main"><div class="ei-from">${readFlag}<span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span>${importance}</div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
     div.addEventListener("click",()=>openEmail(e.id,div));
     div.querySelector("[data-kb-file]")?.addEventListener("click",ev=>{ev.stopPropagation();openKnowledge(ev.currentTarget.dataset.kbFile);});
     div.querySelector("[data-finish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailDone(e.id,{fromList:true});});
@@ -338,6 +369,7 @@ function currentEmailListPayload(extra={}){
     folder:currentFolder||"INBOX",
     account_id:currentAccountId||"",
     q:searchInput.value.trim(),
+    importance:importanceFilter.value,
     ...extra,
   };
 }
@@ -355,10 +387,13 @@ async function finishFilteredEmails(){
     if(!count){setStatus("No unfinished messages match this folder/filter","err");return;}
     const label=folderDisplayName(currentFolder);
     const q=searchInput.value.trim();
+    const importance=importanceFilter.value;
     const msg=[
       `Mark ${count} email${count===1?"":"s"} as finished?`,
       "",
-      q?`Folder: ${label}, search: "${q}"`:`Folder: ${label}`,
+      [q?`search: "${q}"`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).length
+        ?`Folder: ${label}, ${[q?`search: "${q}"`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).join(", ")}`
+        :`Folder: ${label}`,
       "This is local-only and does not mutate the remote IMAP mailbox.",
     ].join("\n");
     if(!confirm(msg))return;
@@ -385,6 +420,10 @@ searchInput.addEventListener("input",()=>{
     emailOffset=0;
     loadEmailList();
   },220);
+});
+importanceFilter.addEventListener("change",()=>{
+  emailOffset=0;
+  loadEmailList(false,{clearMissingSelection:true});
 });
 
 // ─── Open email ───────────────────────────────────────────────────────────
@@ -418,7 +457,9 @@ async function openEmail(id,el){
     emailFindTodosBtn.style.display="";
     loadSuggestedContext(data);
     emailSubject.textContent=data.subject||"(no subject)";emailSubject.style.color="";
-    emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
+    const readLabel=(data.is_read===0||data.is_read===false)?"Unread":"Read";
+    const importanceLabel=data.email_importance?`${data.email_importance}/5`:"Unrated";
+    emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}&nbsp;&nbsp;<strong>Status:</strong> ${readLabel}&nbsp;&nbsp;<strong>Importance:</strong> ${importanceLabel}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
     const html=(data.body_html||"").trim();
     const text=(data.body_text||"").trim();
     if(html){
@@ -822,6 +863,7 @@ let kbEditingFile=null; // filename being edited, null = new
 let kbLlmFilter="all";
 let kbSearchQuery="";
 let kbMergeSelection=new Set();
+let kbCategoryFilter="people";
 
 const kbViewMode=document.getElementById("kb-view-mode");
 const kbEditMode=document.getElementById("kb-edit-mode");
@@ -831,14 +873,23 @@ const kbEditPatterns=document.getElementById("kb-edit-patterns");
 const kbEditContent=document.getElementById("kb-edit-content");
 const kbFilelist=document.getElementById("kb-filelist");
 const kbSearchInput=document.getElementById("kb-search");
+const kbSearchWrap=document.getElementById("kb-search-wrap");
+const kbSearchClearBtn=document.getElementById("kb-search-clear");
 const kbMergeBtn=document.getElementById("kb-merge-btn");
 const kbLlmFilterEl=document.getElementById("kb-llm-filter");
+const kbCategoryTabs=document.getElementById("kb-category-tabs");
 
 async function openKnowledge(preferredFileName=null){
   openModal("kb-modal");
   enterKbViewMode();
   if(preferredFileName)kbLlmFilter="all";
   await reloadKbFiles(preferredFileName);
+  if(preferredFileName){
+    const preferred=kbFiles.find(f=>f.name===preferredFileName);
+    if(preferred?.category)kbCategoryFilter=preferred.category;
+    updateKbCategoryTabs();
+    renderKbList(preferredFileName);
+  }
 }
 
 async function reloadKbFiles(preferredFileName=null){
@@ -879,7 +930,7 @@ function renderKbFilters(){
 }
 
 function filteredKbFiles(){
-  let files=kbFiles;
+  let files=kbFiles.filter(f=>(f.category||"other")===kbCategoryFilter);
   if(kbLlmFilter==="unknown")files=files.filter(f=>!f.metadata?.llm_id);
   else if(kbLlmFilter!=="all")files=files.filter(f=>f.metadata?.llm_id===kbLlmFilter);
   const q=kbSearchQuery.trim().toLowerCase();
@@ -896,11 +947,24 @@ function filteredKbFiles(){
   });
 }
 
+function updateKbCategoryTabs(){
+  kbCategoryTabs.querySelectorAll("[data-kb-category]").forEach(btn=>{
+    btn.classList.toggle("active",btn.dataset.kbCategory===kbCategoryFilter);
+  });
+}
+
 function updateKbMergeButton(){
   kbMergeBtn.disabled=kbMergeSelection.size!==2;
 }
 
+function setKbSearch(value){
+  kbSearchQuery=value||"";
+  kbSearchInput.value=kbSearchQuery;
+  kbSearchWrap.classList.toggle("has-value",!!kbSearchQuery);
+}
+
 function renderKbList(preferredFileName=null){
+  updateKbCategoryTabs();
   const visible=filteredKbFiles();
   if(!visible.length){kbFilelist.innerHTML='<div style="padding:12px;color:var(--dim);font-size:10.5px;">No files match this filter.</div>';updateKbMergeButton();return;}
   const pinned=visible.filter(f=>f.pinned),unpinned=visible.filter(f=>!f.pinned);
@@ -1009,8 +1073,19 @@ document.getElementById("kb-purge-btn").addEventListener("click",async()=>{
 document.getElementById("kb-edit-btn").addEventListener("click",()=>{if(kbSelectedFile)enterKbEditMode(kbSelectedFile);});
 document.getElementById("kb-delete-btn").addEventListener("click",()=>{if(kbSelectedFile)deleteKbFile(kbSelectedFile.name);});
 document.getElementById("kb-pin-btn").addEventListener("click",()=>{if(kbSelectedFile)togglePin(kbSelectedFile.name);});
-kbSearchInput.addEventListener("input",()=>{kbSearchQuery=kbSearchInput.value;renderKbList(kbSelectedFile?.name||null);});
+kbSearchInput.addEventListener("input",()=>{setKbSearch(kbSearchInput.value);renderKbList(kbSelectedFile?.name||null);});
+kbSearchClearBtn.addEventListener("click",()=>{
+  setKbSearch("");
+  kbSearchInput.focus();
+  renderKbList();
+});
 kbLlmFilterEl.addEventListener("change",()=>{kbLlmFilter=kbLlmFilterEl.value;renderKbList(kbSelectedFile?.name||null);});
+kbCategoryTabs.querySelectorAll("[data-kb-category]").forEach(btn=>btn.addEventListener("click",()=>{
+  kbCategoryFilter=btn.dataset.kbCategory;
+  kbMergeSelection=new Set();
+  renderKbList();
+  enterKbViewMode(null);
+}));
 kbMergeBtn.addEventListener("click",async()=>{
   const selected=[...kbMergeSelection];
   if(selected.length!==2)return;
@@ -1655,6 +1730,11 @@ function _populateAccountForm(acct){
   document.getElementById("cfg-body-storage").value=acct?.imap?.body_storage||"text_html";
   document.getElementById("cfg-auto-sync").checked=!!acct?.imap?.auto_sync;
   document.getElementById("cfg-sync-interval").value=acct?.imap?.sync_interval_minutes||5;
+  const fullResyncBtn=document.getElementById("btn-account-full-resync");
+  if(fullResyncBtn){
+    fullResyncBtn.disabled=!acct?.id;
+    fullResyncBtn.dataset.accountId=acct?.id||"";
+  }
   updateProviderHint();
   // Render saved sync_folders if any
   const saved=acct?.imap?.sync_folders||[];
@@ -1852,18 +1932,7 @@ function escHtml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt
 
 // ─── Event wiring ─────────────────────────────────────────────────────────
 document.getElementById("btn-sync").addEventListener("click",()=>{
-  if(taskPollInterval){setStatus("A task is already running","err");return;}
-  const msg=[
-    "Run a complete mail resync?",
-    "",
-    "This ignores the saved IMAP sync position and scans every configured remote folder again.",
-    "Existing local Finished state is preserved, but the sync may take a while.",
-  ].join("\n");
-  if(!confirm(msg))return;
-  const n=accountsCache.length*4;
-  fetch("/api/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({full_resync:true})})
-    .then(()=>startTaskPoll("Full Resync",n,async()=>{await loadFolders();if(currentFolder)await loadEmailList(false,{preserveSelection:true,clearMissingSelection:true});}))
-    .catch(err=>setStatus("Sync error: "+err.message,"err"));
+  syncAllAccounts();
 });
 document.getElementById("btn-build-kb").addEventListener("click",async()=>{
   if(!requireActiveLlm())return;
@@ -1890,6 +1959,151 @@ emailFindTodosBtn.addEventListener("click",ev=>{
   if(!currentEmail?.id){setStatus("Select an email first","err");return;}
   openTodosModal({emailId:currentEmail.id,forceOpen:true,autoStart:true});
 });
+
+// ─── Mail summary ─────────────────────────────────────────────────────────
+const mailSummaryModal=document.getElementById("mail-summary-modal");
+const mailSummaryStart=document.getElementById("mail-summary-start");
+const mailSummaryEnd=document.getElementById("mail-summary-end");
+const mailSummaryResult=document.getElementById("mail-summary-result");
+const mailSummaryRun=document.getElementById("mail-summary-run");
+const mailSummarySave=document.getElementById("mail-summary-save");
+let currentMailSummaryItems=[];
+
+function formatDateInputValue(date){
+  const year=date.getFullYear();
+  const month=String(date.getMonth()+1).padStart(2,"0");
+  const day=String(date.getDate()).padStart(2,"0");
+  return `${year}-${month}-${day}`;
+}
+
+function openMailSummary(){
+  const today=formatDateInputValue(new Date());
+  mailSummaryStart.value=mailSummaryStart.value||today;
+  mailSummaryEnd.value=mailSummaryEnd.value||today;
+  mailSummaryModal.showModal();
+}
+
+function summaryCategoryLabel(value){
+  return String(value||"important_email").replace(/_/g," ");
+}
+
+function starRatingHtml(idx,key,label,value){
+  const current=Number(value)||3;
+  return `<div class="summary-rating" data-summary-rating-group="${key}">
+    <span>${escHtml(label)}</span>
+    <div class="summary-stars" role="radiogroup" aria-label="${escHtml(label)}">
+      ${[1,2,3,4,5].map(n=>`<button type="button" class="${n<=current?"active":""}" data-summary-rating="${idx}" data-rating-key="${key}" data-rating-value="${n}" aria-label="${n} out of 5">${n<=current?"&#9733;":"&#9734;"}</button>`).join("")}
+    </div>
+  </div>`;
+}
+
+function updateSummaryStars(idx,key,value){
+  const item=currentMailSummaryItems[idx];
+  if(!item)return;
+  item[key]=value;
+  mailSummaryResult.querySelectorAll(`[data-summary-rating="${idx}"][data-rating-key="${key}"]`).forEach(btn=>{
+    const active=Number(btn.dataset.ratingValue)<=value;
+    btn.classList.toggle("active",active);
+    btn.innerHTML=active?"&#9733;":"&#9734;";
+  });
+}
+
+function renderStructuredMailSummary(summary,meta){
+  currentMailSummaryItems=(summary.items||[]).map(item=>({
+    ...item,
+    email_importance:item.email_importance||item.user_importance||item.importance||3,
+    topic_importance:item.topic_importance||item.importance||3,
+  }));
+  const intro=[
+    meta.truncated
+      ?`<p><strong>${meta.analyzed}</strong> of <strong>${meta.matched}</strong> unfinished emails included.</p>`
+      :`<p><strong>${meta.analyzed}</strong> unfinished email${meta.analyzed===1?"":"s"} included.</p>`,
+    summary.executive_summary?`<h2>Executive Summary</h2><p>${escHtml(summary.executive_summary)}</p>`:"",
+  ].join("");
+  const cards=currentMailSummaryItems.map((item,idx)=>`
+    <article class="summary-card" data-summary-index="${idx}">
+      <div class="summary-card-head">
+        <div>
+          <div class="summary-category">${escHtml(summaryCategoryLabel(item.category))}</div>
+          <div class="summary-card-title">${escHtml(item.title)}</div>
+        </div>
+      </div>
+      ${item.rationale?`<small>${escHtml(item.rationale)}</small>`:""}
+      ${item.suggested_action?`<small><strong>Suggested action:</strong> ${escHtml(item.suggested_action)}</small>`:""}
+      ${starRatingHtml(idx,"email_importance","This email/item",item.email_importance)}
+      ${starRatingHtml(idx,"topic_importance","The topic",item.topic_importance)}
+    </article>
+  `).join("");
+  mailSummaryResult.classList.add("rendered");
+  mailSummaryResult.innerHTML=intro+(cards||'<div class="summary-empty">No summary items returned.</div>');
+  mailSummaryResult.querySelectorAll("[data-summary-rating][data-rating-key]").forEach(btn=>{
+    btn.addEventListener("click",()=>updateSummaryStars(Number(btn.dataset.summaryRating),btn.dataset.ratingKey,Number(btn.dataset.ratingValue)));
+  });
+  mailSummarySave.disabled=!currentMailSummaryItems.length;
+}
+
+async function runMailSummary(){
+  if(!requireActiveLlm())return;
+  const start=mailSummaryStart.value,end=mailSummaryEnd.value;
+  if(!start||!end){setStatus("Choose a summary timeframe","err");return;}
+  mailSummaryRun.disabled=true;
+  mailSummarySave.disabled=true;
+  currentMailSummaryItems=[];
+  mailSummaryResult.classList.remove("rendered");
+  mailSummaryResult.innerHTML='<div class="summary-empty">Summarizing unfinished emails…</div>';
+  setStatus("Mail summary…","busy");
+  try{
+    const res=await fetch("/api/mail_summary",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({start_date:start,end_date:end,account_id:currentAccountId||""}),
+    }).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!res.ok||!res.data.success)throw new Error(res.data.error||"Mail summary failed");
+    renderStructuredMailSummary(res.data.summary||{},res.data);
+    setStatus("Mail summary ready","ok");
+  }catch(err){
+    mailSummaryResult.classList.remove("rendered");
+    mailSummaryResult.innerHTML=`<div class="summary-empty">Mail summary failed: ${escHtml(err.message)}</div>`;
+    setStatus("Mail summary failed: "+err.message,"err");
+  }finally{
+    mailSummaryRun.disabled=false;
+  }
+}
+
+async function saveMailSummaryFeedback(){
+  if(!currentMailSummaryItems.length){setStatus("No summary ratings to save","err");return;}
+  mailSummarySave.disabled=true;
+  try{
+    const res=await fetch("/api/mail_summary/feedback",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        timeframe:{start_date:mailSummaryStart.value,end_date:mailSummaryEnd.value},
+        items:currentMailSummaryItems,
+      }),
+    }).then(async r=>({ok:r.ok,data:await r.json()}));
+    if(!res.ok||!res.data.success)throw new Error(res.data.error||"Could not save feedback");
+    const updated=Number(res.data.email_importance_updates||0);
+    if(!updated)throw new Error("Topic feedback was saved, but no source emails were rated. Run the summary again so source IDs can be repaired.");
+    setStatus(`Saved topic feedback to KB and rated ${updated} email${updated===1?"":"s"}`,"ok");
+    currentMailSummaryItems=[];
+    mailSummaryResult.classList.remove("rendered");
+    mailSummaryResult.innerHTML='<div class="summary-empty">Ratings saved.</div>';
+    mailSummarySave.disabled=true;
+    mailSummaryModal.close();
+    if(currentFolder)loadEmailList(false,{clearMissingSelection:true});
+  }catch(err){
+    setStatus("Saving ratings failed: "+err.message,"err");
+  }finally{
+    mailSummarySave.disabled=false;
+  }
+}
+
+document.getElementById("btn-mail-summary").addEventListener("click",openMailSummary);
+document.getElementById("mail-summary-close").addEventListener("click",()=>mailSummaryModal.close());
+mailSummaryRun.addEventListener("click",runMailSummary);
+mailSummarySave.addEventListener("click",saveMailSummaryFeedback);
+mailSummaryModal.addEventListener("click",e=>{if(e.target===mailSummaryModal)mailSummaryModal.close();});
 
 // ─── Todo finder ──────────────────────────────────────────────────────────
 let todoPendingPayload=null,todoPreviewTimer=null,todoJobTimer=null,todoLatestCount=0,todoSingleEmailId="";
@@ -2606,6 +2820,7 @@ document.getElementById("btn-debug-mark-read").addEventListener("click",()=>{
 document.getElementById("btn-save-settings").addEventListener("click",saveSettings);
 document.getElementById("add-account-btn").addEventListener("click",openNewAccount);
 document.getElementById("btn-acct-back").addEventListener("click",()=>{switchTab("tab-accounts");settingsFooterMode("list");});
+document.getElementById("btn-account-full-resync").addEventListener("click",e=>fullResyncAccount(e.currentTarget.dataset.accountId));
 document.getElementById("btn-propose").addEventListener("click",proposeResponse);
 document.getElementById("btn-copy").addEventListener("click",copyResponse);
 document.getElementById("btn-copy-done").addEventListener("click",copyResponseAndDone);

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='full-resync-20260508') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='sync-split-20260508') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -13,7 +13,8 @@
     <div class="logo">Mail<span> // local</span></div>
     <div id="search-wrap"><span class="ico">&#128269;</span><input id="search-input" type="text" placeholder="Search subject / sender…" autocomplete="off"/></div>
     <div id="header-actions">
-      <button class="hbtn accent" id="btn-sync" title="Scan all configured remote folders again">&#8635; Full Resync</button>
+      <button class="hbtn accent" id="btn-sync" title="Fetch new mail from configured folders">&#8635; Sync</button>
+      <button class="hbtn summary-action" id="btn-mail-summary">&#9776; Mail Summary</button>
       <div id="todo-finder-wrap">
         <button class="hbtn todo-action" id="btn-find-todos">&#9745; Todos</button>
       </div>
@@ -35,6 +36,15 @@
     <div id="maillist-header">
       <span id="maillist-title">Inbox</span>
       <span id="email-count">—</span>
+      <select id="importance-filter" title="Filter by email importance">
+        <option value="">All</option>
+        <option value="5">★★★★★</option>
+        <option value="4">★★★★</option>
+        <option value="3">★★★</option>
+        <option value="2">★★</option>
+        <option value="1">★</option>
+        <option value="unrated">Unrated</option>
+      </select>
       <button id="btn-finish-filtered" title="Mark all emails in the current folder/filter as done">&#10003;</button>
     </div>
     <div id="email-list"><div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Select a folder.</div></div>
@@ -134,15 +144,22 @@
 
 <!-- ── Knowledge modal ────────────────────────────────────────────────────── -->
 <div id="kb-modal" class="modal-overlay">
-  <div class="modal-box" style="width:860px;max-width:95vw;height:84vh;">
+  <div class="modal-box kb-modal-box">
     <div class="modal-header">
       <span class="m-title">Knowledge Base</span>
       <button class="modal-close" data-close="kb-modal">&#215;</button>
     </div>
     <div id="kb-body">
-      <div style="display:flex;flex-direction:column;width:200px;border-right:1px solid var(--border);flex-shrink:0;">
+      <div id="kb-sidebar">
         <div id="kb-list-tools">
-          <input id="kb-search" type="text" placeholder="Search knowledge…" autocomplete="off"/>
+          <div id="kb-category-tabs">
+            <button class="active" data-kb-category="people">People</button>
+            <button data-kb-category="other">Other</button>
+          </div>
+          <div id="kb-search-wrap">
+            <input id="kb-search" type="text" placeholder="Search knowledge…" autocomplete="off"/>
+            <button id="kb-search-clear" title="Clear search" aria-label="Clear knowledge search">&#215;</button>
+          </div>
           <button id="kb-merge-btn" title="Merge two selected entries" disabled>Merge selected</button>
         </div>
         <div id="kb-filelist" style="flex:1;overflow-y:auto;padding:6px 0;"></div>
@@ -277,6 +294,10 @@
           </div>
         </div>
         <label class="check-row"><input id="cfg-auto-sync" type="checkbox"/> Auto-sync this account</label>
+        <div class="account-maintenance-actions">
+          <button class="sbtn danger" id="btn-account-full-resync" type="button">Full Resync This Account</button>
+          <div class="field-hint">Use this only when local mail is missing or out of date. It ignores the saved IMAP sync position for this account.</div>
+        </div>
 
         <!-- Folder picker -->
         <div class="section-label" style="margin-top:14px;">Sync Folders</div>
@@ -484,8 +505,30 @@
   </div>
 </dialog>
 
+<dialog id="mail-summary-modal">
+  <div class="summary-head">
+    <strong>Mail Summary</strong>
+    <button id="mail-summary-close" type="button">&#215;</button>
+  </div>
+  <div id="mail-summary-controls">
+    <label>
+      <span>Start</span>
+      <input id="mail-summary-start" type="date"/>
+    </label>
+    <label>
+      <span>End</span>
+      <input id="mail-summary-end" type="date"/>
+    </label>
+    <button class="rbtn primary summary-action" id="mail-summary-run">Summarize</button>
+    <button class="rbtn summary-action" id="mail-summary-save" disabled>Save ratings</button>
+  </div>
+  <div id="mail-summary-result">
+    <div class="summary-empty">Choose a timeframe to summarize unfinished emails.</div>
+  </div>
+</dialog>
+
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='full-resync-20260508') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='sync-split-20260508') }}"></script>
 </body>
 </html>

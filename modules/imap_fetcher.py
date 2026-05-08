@@ -151,6 +151,32 @@ class IMAPFetcher:
                 continue
         return result
 
+    @staticmethod
+    def _fetch_response_flags(fetch_data) -> bytes:
+        chunks = []
+        for item in fetch_data or []:
+            if isinstance(item, tuple):
+                chunks.append(item[0] if isinstance(item[0], bytes) else str(item[0]).encode())
+            elif isinstance(item, bytes):
+                chunks.append(item)
+        return b" ".join(chunks)
+
+    @classmethod
+    def _is_read_from_fetch_response(cls, fetch_data) -> bool:
+        flags_blob = cls._fetch_response_flags(fetch_data)
+        match = re.search(br"FLAGS \(([^)]*)\)", flags_blob, flags=re.IGNORECASE)
+        flags = match.group(1).lower().split() if match else []
+        return b"\\seen" in flags
+
+    @staticmethod
+    def _raw_message_from_fetch_response(fetch_data):
+        for item in fetch_data or []:
+            if isinstance(item, tuple) and item[1]:
+                header = item[0] if isinstance(item[0], bytes) else str(item[0]).encode()
+                if b"RFC822" in header:
+                    return item[1]
+        return None
+
     def _fetch_folder(self, conn, folder_name: str, limit: int, full_resync: bool = False) -> dict:
         try:
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
@@ -182,10 +208,22 @@ class IMAPFetcher:
                 uid_int = int(uid)
                 max_seen_uid = max(max_seen_uid, uid_int)
                 if uidvalidity and database.email_uid_exists(self.account_id, folder_name, uidvalidity, uid_int):
+                    if full_resync:
+                        _, flag_data = conn.uid("fetch", uid, "(FLAGS)")
+                        database.update_email_read_status_by_uid(
+                            self.account_id,
+                            folder_name,
+                            uidvalidity,
+                            uid_int,
+                            self._is_read_from_fetch_response(flag_data),
+                        )
                     continue
 
-                _, msg_data = conn.uid("fetch", uid, "(RFC822)")
-                raw = msg_data[0][1]
+                _, msg_data = conn.uid("fetch", uid, "(FLAGS RFC822)")
+                is_read = self._is_read_from_fetch_response(msg_data)
+                raw = self._raw_message_from_fetch_response(msg_data)
+                if not raw:
+                    raise ValueError("No RFC822 payload returned")
                 msg = email.message_from_bytes(raw)
 
                 # Raw message-ID (not yet scoped to account)
@@ -231,6 +269,7 @@ class IMAPFetcher:
                     "in_reply_to": (msg.get("In-Reply-To") or "").strip(),
                     "imap_uid":   uid_int,
                     "uidvalidity": uidvalidity,
+                    "is_read":    is_read,
                 })
                 count += 1
 

@@ -2,7 +2,7 @@ import sqlite3
 import json
 import os
 import email.utils
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app import paths
@@ -49,7 +49,11 @@ def init_db():
             done_at     TEXT,
             original_folder TEXT,
             imap_uid    INTEGER,
-            uidvalidity TEXT
+            uidvalidity TEXT,
+            is_read     INTEGER DEFAULT 1,
+            email_importance INTEGER,
+            email_importance_note TEXT,
+            email_importance_updated_at TEXT
         );
         CREATE TABLE IF NOT EXISTS sync_state (
             account_id    TEXT NOT NULL,
@@ -91,6 +95,10 @@ def init_db():
     ensure_email_column("original_folder", "original_folder TEXT")
     ensure_email_column("imap_uid", "imap_uid INTEGER")
     ensure_email_column("uidvalidity", "uidvalidity TEXT")
+    ensure_email_column("is_read", "is_read INTEGER DEFAULT 1")
+    ensure_email_column("email_importance", "email_importance INTEGER")
+    ensure_email_column("email_importance_note", "email_importance_note TEXT")
+    ensure_email_column("email_importance_updated_at", "email_importance_updated_at TEXT")
 
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
@@ -98,6 +106,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
         CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
         CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
+        CREATE INDEX IF NOT EXISTS idx_emails_importance ON emails(email_importance);
         CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
         CREATE INDEX IF NOT EXISTS idx_processed_actions_created ON processed_actions(created_at);
         CREATE INDEX IF NOT EXISTS idx_processed_actions_action ON processed_actions(action, created_at);
@@ -140,14 +149,24 @@ def _parse_email_date_ts(value: str) -> Optional[float]:
         return None
 
 
+def _local_date_start_ts(value: str) -> Optional[float]:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def save_email(data):
     conn = get_connection()
     existing = conn.execute(
-        "SELECT done_at, original_folder FROM emails WHERE id = ?",
+        "SELECT done_at, original_folder, email_importance, email_importance_note, email_importance_updated_at FROM emails WHERE id = ?",
         (data["id"],),
     ).fetchone()
     done_at = existing["done_at"] if existing else None
     original_folder = existing["original_folder"] if existing else None
+    email_importance = existing["email_importance"] if existing else None
+    email_importance_note = existing["email_importance_note"] if existing else None
+    email_importance_updated_at = existing["email_importance_updated_at"] if existing else None
     folder = FINISHED_FOLDER if done_at else data.get("folder", "")
     if done_at and not original_folder:
         original_folder = data.get("folder", "")
@@ -156,8 +175,9 @@ def save_email(data):
         """INSERT OR REPLACE INTO emails
            (id, folder, subject, sender, recipients, date, date_ts,
             body_text, body_html, message_id, in_reply_to, fetched_at, account_id,
-            done_at, original_folder, imap_uid, uidvalidity)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            done_at, original_folder, imap_uid, uidvalidity, is_read,
+            email_importance, email_importance_note, email_importance_updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             data["id"],
             folder,
@@ -176,13 +196,33 @@ def save_email(data):
             original_folder,
             data.get("imap_uid"),
             data.get("uidvalidity", ""),
+            1 if data.get("is_read", True) else 0,
+            email_importance,
+            email_importance_note,
+            email_importance_updated_at,
         ),
     )
     conn.commit()
     conn.close()
 
 
-def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search=""):
+def _apply_importance_filter(where: list[str], params: list, importance=None) -> None:
+    importance = str(importance or "").strip().lower()
+    if not importance:
+        return
+    if importance == "unrated":
+        where.append("email_importance IS NULL")
+        return
+    try:
+        rating = int(importance)
+    except (TypeError, ValueError):
+        return
+    if 1 <= rating <= 5:
+        where.append("email_importance = ?")
+        params.append(rating)
+
+
+def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", importance=None):
     conn = get_connection()
     search = (search or "").strip()
     where = ["folder = ?"]
@@ -201,8 +241,9 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search=""):
             )"""
         )
         params.extend([like, like, like, like])
+    _apply_importance_filter(where, params, importance)
     params.extend([limit, offset])
-    sql = f"""SELECT id, folder, subject, sender, recipients, date, message_id, account_id
+    sql = f"""SELECT id, folder, subject, sender, recipients, date, message_id, account_id, is_read, email_importance
               FROM emails WHERE {' AND '.join(where)}
               ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
               LIMIT ? OFFSET ?"""
@@ -211,7 +252,37 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search=""):
     return [dict(r) for r in rows]
 
 
-def _email_filter_where(folder: str, account_id=None, search="") -> tuple[list[str], list]:
+def update_email_read_status_by_uid(account_id: str, folder: str, uidvalidity: str, imap_uid: int, is_read: bool) -> None:
+    conn = get_connection()
+    conn.execute(
+        """UPDATE emails SET is_read = ?
+           WHERE account_id = ?
+             AND uidvalidity = ?
+             AND imap_uid = ?
+             AND (folder = ? OR original_folder = ?)""",
+        (1 if is_read else 0, account_id, uidvalidity, imap_uid, folder, folder),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
+    rating = max(1, min(5, int(rating or 3)))
+    conn = get_connection()
+    cur = conn.execute(
+        """UPDATE emails
+           SET email_importance = ?,
+               email_importance_note = ?,
+               email_importance_updated_at = ?
+           WHERE id = ?""",
+        (rating, (note or "")[:1000], datetime.now().isoformat(), email_id),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def _email_filter_where(folder: str, account_id=None, search="", importance=None) -> tuple[list[str], list]:
     where = ["folder = ?"]
     params = [folder]
     if account_id:
@@ -229,12 +300,13 @@ def _email_filter_where(folder: str, account_id=None, search="") -> tuple[list[s
             )"""
         )
         params.extend([like, like, like, like])
+    _apply_importance_filter(where, params, importance)
     return where, params
 
 
-def count_emails_for_finish(folder: str, account_id=None, search="") -> int:
+def count_emails_for_finish(folder: str, account_id=None, search="", importance=None) -> int:
     conn = get_connection()
-    where, params = _email_filter_where(folder, account_id=account_id, search=search)
+    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance)
     where.append("done_at IS NULL")
     count = conn.execute(
         f"SELECT COUNT(*) FROM emails WHERE {' AND '.join(where)}",
@@ -244,9 +316,9 @@ def count_emails_for_finish(folder: str, account_id=None, search="") -> int:
     return int(count or 0)
 
 
-def mark_filtered_emails_done(folder: str, account_id=None, search="") -> dict:
+def mark_filtered_emails_done(folder: str, account_id=None, search="", importance=None) -> dict:
     conn = get_connection()
-    where, params = _email_filter_where(folder, account_id=account_id, search=search)
+    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance)
     where.append("done_at IS NULL")
     ts = datetime.now().isoformat()
     cur = conn.execute(
@@ -474,6 +546,41 @@ def get_all_emails():
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_unfinished_emails_for_summary(start_date: str, end_date: str, account_id=None, excluded_folders=None, limit=120) -> dict:
+    conn = get_connection()
+    where = ["done_at IS NULL", "folder != ?"]
+    params = [FINISHED_FOLDER]
+    for folder in excluded_folders or []:
+        if folder:
+            where.append("folder != ?")
+            params.append(folder)
+    if account_id:
+        where.append("account_id = ?")
+        params.append(account_id)
+    start_ts = _local_date_start_ts(start_date)
+    end_ts = _local_date_start_ts(end_date)
+    if start_ts is not None:
+        where.append("date_ts >= ?")
+        params.append(start_ts)
+    if end_ts is not None:
+        where.append("date_ts < ?")
+        params.append(end_ts + timedelta(days=1).total_seconds())
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM emails WHERE {' AND '.join(where)}",
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""SELECT id, account_id, folder, subject, sender, recipients, date, body_text, is_read, email_importance
+            FROM emails
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
+            LIMIT ?""",
+        [*params, int(limit or 120)],
+    ).fetchall()
+    conn.close()
+    return {"rows": [dict(r) for r in rows], "total": int(total or 0)}
 
 
 def get_unprocessed_kb_emails():

@@ -1,12 +1,8 @@
-import glob
-import os
-
 from flask import Blueprint, jsonify, request
 
 from app import runtime as rt
 from app.task_runner import run_background, task_status
 from modules import database
-from modules import knowledge_builder
 
 
 bp = Blueprint("knowledge", __name__, url_prefix="/api")
@@ -104,9 +100,9 @@ def delete_knowledge_by_llm(llm_id):
 @bp.route("/purge_contacts", methods=["POST"])
 def purge_contacts():
     deleted = []
-    for path in glob.glob(os.path.join(knowledge_builder.KNOWLEDGE_DIR, "*.md")):
-        fname = os.path.basename(path)
-        if not fname.startswith("_"):
+    for item in rt.kb.list_knowledge_files():
+        fname = item.get("name", "")
+        if item.get("category") == "people" and not fname.startswith("_"):
             rt.kb.delete_knowledge_file(fname)
             deleted.append(fname)
 
