@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='kb-icloud-lazy-20260509') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='theme-system-20260509') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -368,6 +368,16 @@
 
       <!-- Advanced -->
       <div id="tab-advanced" class="tab-pane">
+        <div class="section-label">Appearance</div>
+        <div class="field-group">
+          <label>Theme</label>
+          <select id="cfg-theme-mode" autocomplete="off">
+            <option value="system">Use system appearance</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+          <div class="field-hint">System follows the current macOS light/dark appearance and updates when it changes.</div>
+        </div>
         <div class="section-label">LLM Prompts</div>
         <div class="field-hint prompt-hint">Use placeholders like <code>&lbrace;&lbrace;kb_text&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;snippets&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;addr&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;display_name&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;received_count&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;replied_count&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;from_text&rbrace;&rbrace;</code>, and <code>&lbrace;&lbrace;reply_text&rbrace;&rbrace;</code> where needed.</div>
         <div class="prompt-actions">
@@ -529,6 +539,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='kb-icloud-lazy-20260509') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='theme-system-20260509') }}"></script>
 </body>
 </html>

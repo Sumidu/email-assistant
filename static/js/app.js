@@ -13,9 +13,57 @@ let calendarWeekStart=null;
 
 // ─── Theme ────────────────────────────────────────────────────────────────
 const html=document.documentElement,themeToggle=document.getElementById("theme-toggle");
-function applyTheme(t){html.setAttribute("data-theme",t);themeToggle.textContent=t==="dark"?"☀":"☾";localStorage.setItem("mail-theme",t);}
-applyTheme(localStorage.getItem("mail-theme")||"light");
-themeToggle.addEventListener("click",()=>applyTheme(html.getAttribute("data-theme")==="dark"?"light":"dark"));
+const systemThemeQuery=window.matchMedia?window.matchMedia("(prefers-color-scheme: dark)"):null;
+let themeMode=localStorage.getItem("mail-theme-mode")||localStorage.getItem("mail-theme")||"system";
+function normalizedThemeMode(mode){
+  mode=String(mode||"system").toLowerCase();
+  return ["system","light","dark"].includes(mode)?mode:"system";
+}
+function resolvedTheme(mode=themeMode){
+  mode=normalizedThemeMode(mode);
+  if(mode==="system")return systemThemeQuery?.matches?"dark":"light";
+  return mode;
+}
+function applyThemeMode(mode,{persist=true}={}){
+  themeMode=normalizedThemeMode(mode);
+  const resolved=resolvedTheme(themeMode);
+  html.setAttribute("data-theme",resolved);
+  html.dataset.themeMode=themeMode;
+  themeToggle.textContent=themeMode==="system"?"◐":resolved==="dark"?"☀":"☾";
+  themeToggle.title=themeMode==="system"?`Using system appearance (${resolved})`:`Using ${themeMode} appearance`;
+  if(persist)localStorage.setItem("mail-theme-mode",themeMode);
+  const select=document.getElementById("cfg-theme-mode");
+  if(select)select.value=themeMode;
+}
+async function persistThemeMode(mode){
+  try{
+    const cfg=await fetch("/api/config").then(r=>r.json());
+    await fetch("/api/config",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({app:{...cfg.app,theme_mode:normalizedThemeMode(mode)}}),
+    });
+  }catch{}
+}
+function setThemeMode(mode,{persistConfig=false}={}){
+  applyThemeMode(mode);
+  if(persistConfig)persistThemeMode(themeMode);
+}
+applyThemeMode(themeMode,{persist:false});
+async function initThemeFromConfig(){
+  try{
+    const cfg=await fetch("/api/config").then(r=>r.json());
+    applyThemeMode(cfg.app?.theme_mode||themeMode);
+  }catch{}
+}
+initThemeFromConfig();
+if(systemThemeQuery){
+  systemThemeQuery.addEventListener("change",()=>{if(themeMode==="system")applyThemeMode("system",{persist:false});});
+}
+themeToggle.addEventListener("click",()=>{
+  const current=resolvedTheme();
+  setThemeMode(current==="dark"?"light":"dark",{persistConfig:true});
+});
 
 // ─── Layout controls ─────────────────────────────────────────────────────
 const appShell=document.getElementById("app");
@@ -1418,6 +1466,7 @@ async function retestActiveLlmHealth(){
 
 function initLlmSettings(cfg){
   settingsConfig=cfg;
+  applyThemeMode(cfg.app?.theme_mode||themeMode);
   llmDrafts=(cfg.llms&&cfg.llms.length?cfg.llms:[cfg.lm_studio||{}]).map((l,i)=>({
     id:l.id||("llm_"+(i+1)),
     name:l.name||l.model||"LLM",
@@ -1431,6 +1480,10 @@ function initLlmSettings(cfg){
   populatePromptSettings(cfg.prompts||{});
   populateQuickTemplates(cfg.quick_templates||[]);
 }
+
+document.getElementById("cfg-theme-mode")?.addEventListener("change",function(){
+  applyThemeMode(this.value);
+});
 
 async function loadActiveLlmPicker(){
   try{
@@ -1923,7 +1976,7 @@ async function saveSettings(){
   const payload={
     llms:llmDrafts,
     default_llm_id:defaultId,
-    app:{active_llm_id:activeLlmSelect.value||defaultId},
+    app:{active_llm_id:activeLlmSelect.value||defaultId,theme_mode:normalizedThemeMode(document.getElementById("cfg-theme-mode")?.value||themeMode)},
     prompts:collectPromptSettings(),
     quick_templates:collectQuickTemplates(),
   };
