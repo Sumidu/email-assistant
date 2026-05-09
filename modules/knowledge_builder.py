@@ -42,7 +42,6 @@ class KnowledgeBuilder:
         _set_knowledge_dir(paths.resolve_knowledge_dir())
         os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
         self._ensure_knowledge_dirs()
-        self._migrate_knowledge_folders()
 
     def _ensure_knowledge_dirs(self) -> None:
         os.makedirs(os.path.join(KNOWLEDGE_DIR, PEOPLE_DIR_NAME), exist_ok=True)
@@ -67,7 +66,7 @@ class KnowledgeBuilder:
 
     def _knowledge_path(self, filename: str, category: str | None = None) -> str:
         fname = os.path.basename(filename)
-        categories = [category] if category else [PEOPLE_DIR_NAME, OTHER_DIR_NAME, ""]
+        categories = [category] if category else ["", PEOPLE_DIR_NAME, OTHER_DIR_NAME]
         for cat in categories:
             fpath = os.path.join(KNOWLEDGE_DIR, cat, fname) if cat else os.path.join(KNOWLEDGE_DIR, fname)
             if os.path.exists(fpath):
@@ -78,7 +77,7 @@ class KnowledgeBuilder:
     def _knowledge_files(self) -> list[str]:
         files = []
         seen = set()
-        for cat in (PEOPLE_DIR_NAME, OTHER_DIR_NAME, ""):
+        for cat in ("", PEOPLE_DIR_NAME, OTHER_DIR_NAME):
             directory = os.path.join(KNOWLEDGE_DIR, cat) if cat else KNOWLEDGE_DIR
             if not os.path.isdir(directory):
                 continue
@@ -155,7 +154,7 @@ class KnowledgeBuilder:
             "generated_at": datetime.now().isoformat(),
         }
 
-    def _load_metadata(self) -> dict:
+    def _load_metadata(self, merge_frontmatter: bool = False) -> dict:
         metadata = {}
         if not os.path.exists(METADATA_PATH):
             metadata = {}
@@ -165,7 +164,15 @@ class KnowledgeBuilder:
                     metadata = json.load(f)
             except Exception:
                 metadata = {}
-        return self._merge_frontmatter_metadata(metadata)
+        return self._merge_frontmatter_metadata(metadata) if merge_frontmatter else metadata
+
+    def _read_frontmatter_preview(self, filename: str, limit: int = 65536) -> tuple[dict, str, str]:
+        """Read enough of a knowledge file for list metadata without loading all iCloud files."""
+        fpath = self._knowledge_path(filename)
+        with open(fpath, "r", encoding="utf-8") as f:
+            sample = f.read(limit)
+        frontmatter, body = self._split_frontmatter(sample)
+        return frontmatter, body, sample
 
     def _merge_frontmatter_metadata(self, metadata: dict) -> dict:
         if not os.path.isdir(KNOWLEDGE_DIR):
@@ -1197,27 +1204,37 @@ class KnowledgeBuilder:
             if not fname.endswith(".md"):
                 continue
             fpath = self._knowledge_path(fname)
-            read_error = ""
-            content = ""
-            try:
-                with open(fpath, "r", encoding="utf-8") as f:
-                    content = f.read()
-                file_meta, body = self._split_frontmatter(content)
-            except (OSError, UnicodeDecodeError) as exc:
-                read_error = str(exc)
-                file_meta = {}
-                body = f"Could not read this knowledge file:\n\n{read_error}"
             meta = metadata.get(fname, {})
-            merged_meta = dict(file_meta)
-            merged_meta.update(meta)
-            if read_error:
-                merged_meta["read_error"] = read_error
-            category = self._knowledge_category(fname, merged_meta, content)
-            result.append({"name": fname, "path": fpath, "content": body,
+            category = self._knowledge_category(fname, meta)
+            result.append({"name": fname, "path": fpath, "content": "",
+                            "loaded": False,
                             "category": "people" if category == PEOPLE_DIR_NAME else "other",
                             "pinned": fname in pinned,
-                            "metadata": merged_meta})
+                            "metadata": meta})
         return result
+
+    def read_knowledge_file(self, filename: str) -> dict:
+        fname = os.path.basename(filename)
+        if not fname.endswith(".md"):
+            return {"success": False, "error": "Invalid knowledge filename"}
+        fpath = self._knowledge_path(fname)
+        if not os.path.exists(fpath):
+            return {"success": False, "error": "Knowledge file not found"}
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            file_meta, body = self._split_frontmatter(content)
+            metadata = self._load_metadata().get(fname, {})
+            merged_meta = dict(file_meta)
+            merged_meta.update(metadata)
+            category = self._knowledge_category(fname, merged_meta, content)
+            return {"success": True, "name": fname, "path": fpath, "content": body,
+                    "loaded": True,
+                    "category": "people" if category == PEOPLE_DIR_NAME else "other",
+                    "pinned": fname in set(self.get_pinned()),
+                    "metadata": merged_meta}
+        except (OSError, UnicodeDecodeError) as exc:
+            return {"success": False, "error": str(exc)}
 
     def suggested_context(self, sender_email: str, recipient_emails=None) -> list:
         """Return filenames that should be pre-selected for an email:

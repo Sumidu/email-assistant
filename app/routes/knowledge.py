@@ -43,6 +43,13 @@ def knowledge_files():
     return jsonify(rt.kb.list_knowledge_files())
 
 
+@bp.route("/knowledge_files/<path:filename>", methods=["GET"])
+def get_knowledge_file(filename):
+    result = rt.kb.read_knowledge_file(filename)
+    status = 200 if result.get("success") else 404
+    return jsonify(result), status
+
+
 @bp.route("/knowledge_files", methods=["POST"])
 def create_knowledge_file():
     data = request.json

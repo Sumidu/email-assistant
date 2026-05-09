@@ -1018,7 +1018,7 @@ async function togglePin(name){
 function selectKbFile(idx,el){
   kbFilelist.querySelectorAll(".kb-file-item").forEach(x=>x.classList.remove("active"));
   if(el)el.classList.add("active");
-  enterKbViewMode(kbFiles[idx]);
+  enterKbViewMode(kbFiles[idx],idx);
 }
 
 const kbViewToolbar=document.getElementById("kb-view-toolbar");
@@ -1026,10 +1026,33 @@ const kbViewFilenameEl=document.getElementById("kb-view-filename");
 const kbPinBtn=document.getElementById("kb-pin-btn");
 let kbSelectedFile=null;
 
-function enterKbViewMode(file){
+async function ensureKbFileLoaded(file,idx){
+  if(!file||file.loaded)return file;
+  const result=await fetch(`/api/knowledge_files/${encodeURIComponent(file.name)}`).then(r=>r.json());
+  if(!result.success)throw new Error(result.error||"Could not load knowledge file");
+  const full={...file,...result,loaded:true};
+  if(typeof idx==="number")kbFiles[idx]=full;
+  return full;
+}
+
+async function enterKbViewMode(file,idx=null){
   kbViewMode.style.display="";kbEditMode.style.display="none";
   kbSelectedFile=file||null;
   if(file){
+    if(!file.loaded){
+      kbViewMode.classList.remove("rendered");
+      kbViewMode.textContent="Loading knowledge file...";
+      kbViewMode.style.color="var(--dim)";
+      kbViewFilenameEl.textContent=`${file.name} · ${kbMetaLabel(file)}`;kbViewToolbar.style.display="flex";
+      try{
+        file=await ensureKbFileLoaded(file,idx);
+        kbSelectedFile=file;
+      }catch(err){
+        kbViewMode.textContent=err.message;
+        kbViewMode.style.color="var(--red)";
+        return;
+      }
+    }
     kbViewMode.classList.add("rendered");
     kbViewMode.innerHTML=renderMarkdownText(file.content);
     kbViewMode.style.color="";
