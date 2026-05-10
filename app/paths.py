@@ -33,6 +33,11 @@ FALLBACK_KNOWLEDGE_DIRS = [
 CONFIG_PATH = APP_SUPPORT_DIR / "config.json"
 DB_PATH = APP_SUPPORT_DIR / "emails.db"
 LLM_LOG_PATH = LOG_DIR / "llm_requests.log"
+TRIAGE_PATH = (
+    CLOUD_APP_DIR / "triage.json"
+    if ICLOUD_DRIVE_DIR.exists()
+    else APP_SUPPORT_DIR / "triage.json"
+)
 
 
 def _has_markdown_files(path: Path) -> bool:

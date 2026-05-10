@@ -19,6 +19,7 @@ def init(base_dir: str) -> None:
     keychain_store.migrate(config, save_config)
     keychain_store.inject_secrets(config)
     database.init_db()
+    database.init_triage_sync()
     reload_modules()
 
 

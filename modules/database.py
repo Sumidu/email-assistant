@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app import paths
+from modules import triage_store
 
 DB_PATH = str(paths.DB_PATH)
 FINISHED_FOLDER = "Finished"
@@ -555,6 +556,10 @@ def mark_filtered_emails_done(folder: str, account_id=None, search="", importanc
     where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance, status=status)
     where.append("done_at IS NULL")
     ts = datetime.now().isoformat()
+    affected = conn.execute(
+        f"SELECT id, folder FROM emails WHERE {' AND '.join(where)}",
+        params,
+    ).fetchall()
     cur = conn.execute(
         f"""UPDATE emails
             SET folder = ?, done_at = ?, original_folder = COALESCE(original_folder, ?)
@@ -563,6 +568,10 @@ def mark_filtered_emails_done(folder: str, account_id=None, search="", importanc
     )
     conn.commit()
     conn.close()
+    triage_store.record_done_batch([
+        {"email_id": r["id"], "done_at": ts, "original_folder": r["folder"]}
+        for r in affected
+    ])
     return {"success": True, "count": int(cur.rowcount or 0), "folder": FINISHED_FOLDER}
 
 def get_email_by_id(email_id):
@@ -743,12 +752,14 @@ def mark_email_done(email_id: str) -> dict:
         return {"success": True, "already_done": True}
 
     ts = datetime.now().isoformat()
+    original_folder = row["folder"]
     conn.execute(
         "UPDATE emails SET folder = ?, done_at = ?, original_folder = ? WHERE id = ?",
-        (FINISHED_FOLDER, ts, row["folder"], email_id),
+        (FINISHED_FOLDER, ts, original_folder, email_id),
     )
     conn.commit()
     conn.close()
+    triage_store.record_done(email_id, ts, original_folder)
     return {"success": True, "folder": FINISHED_FOLDER, "done_at": ts}
 
 
@@ -768,6 +779,7 @@ def unmark_email_done(email_id: str) -> dict:
     )
     conn.commit()
     conn.close()
+    triage_store.record_undone(email_id)
     return {"success": True, "folder": target_folder}
 
 
@@ -795,14 +807,17 @@ def delete_email_local(email_id: str) -> dict:
 
 
 def record_processed_action(action: str, email_id: str = "", account_id: str = "") -> None:
+    ts = datetime.now().isoformat()
     conn = get_connection()
     conn.execute(
         """INSERT INTO processed_actions (email_id, account_id, action, created_at)
            VALUES (?, ?, ?, ?)""",
-        (email_id, account_id, action, datetime.now().isoformat()),
+        (email_id, account_id, action, ts),
     )
     conn.commit()
     conn.close()
+    if action == "spam":
+        triage_store.record_spam(email_id, account_id, ts)
 
 
 def get_all_emails():
@@ -1047,3 +1062,74 @@ def get_calendar_events(account_id=None, start_ts=None, end_ts=None, limit=500):
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def init_triage_sync() -> None:
+    """Sync triage state between local DB and the iCloud triage.json file.
+
+    First run (file absent): export all local done/spam state to create the
+    cloud file.  Subsequent runs: apply cloud state to the local DB so that
+    triage decisions made on another device take effect here.
+    """
+    if not triage_store.exists():
+        # First time — seed the cloud file from the local DB.
+        conn = get_connection()
+        done_rows = conn.execute(
+            "SELECT id, done_at, original_folder FROM emails WHERE done_at IS NOT NULL"
+        ).fetchall()
+        spam_rows = conn.execute(
+            "SELECT email_id, account_id, created_at FROM processed_actions WHERE action = 'spam'"
+        ).fetchall()
+        conn.close()
+        triage_store.save_raw({
+            "done": {
+                r["id"]: {"done_at": r["done_at"], "original_folder": r["original_folder"] or "INBOX"}
+                for r in done_rows
+            },
+            "spam": [
+                {"email_id": r["email_id"], "account_id": r["account_id"], "created_at": r["created_at"]}
+                for r in spam_rows
+            ],
+        })
+        return
+
+    data = triage_store.load()
+    cloud_done: dict = data.get("done", {})
+    cloud_spam: list = data.get("spam", [])
+
+    conn = get_connection()
+
+    # Emails done in cloud but not locally → mark done
+    for email_id, state in cloud_done.items():
+        row = conn.execute("SELECT done_at FROM emails WHERE id = ?", (email_id,)).fetchone()
+        if row and not row["done_at"]:
+            conn.execute(
+                "UPDATE emails SET folder = ?, done_at = ?, original_folder = COALESCE(original_folder, ?) WHERE id = ?",
+                (FINISHED_FOLDER, state["done_at"], state.get("original_folder", "INBOX"), email_id),
+            )
+
+    # Emails done locally but not in cloud → unmark (propagate unmark from another device)
+    local_done = conn.execute(
+        "SELECT id, original_folder FROM emails WHERE done_at IS NOT NULL"
+    ).fetchall()
+    for row in local_done:
+        if row["id"] not in cloud_done:
+            conn.execute(
+                "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
+                (row["original_folder"] or "INBOX", row["id"]),
+            )
+
+    # Spam records in cloud but not locally → insert for daily counts
+    for sp in cloud_spam:
+        exists = conn.execute(
+            "SELECT id FROM processed_actions WHERE email_id = ? AND action = 'spam' AND created_at = ?",
+            (sp.get("email_id", ""), sp.get("created_at", "")),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO processed_actions (email_id, account_id, action, created_at) VALUES (?, ?, 'spam', ?)",
+                (sp.get("email_id", ""), sp.get("account_id", ""), sp.get("created_at", "")),
+            )
+
+    conn.commit()
+    conn.close()
