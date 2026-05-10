@@ -149,6 +149,20 @@ The application SHALL provide a navigable email list grouped by local folders an
 - **AND** it SHALL keep pagination available for additional matching results
 - **AND** it SHALL preserve the selected folder context.
 
+#### Scenario: Show thread rows in the email list
+
+- **WHEN** a selected folder contains multiple local emails belonging to the same conversation thread
+- **THEN** the email list SHALL show the newest matching email as the thread row
+- **AND** it SHALL show compact received and sent count badges for the thread where counts are available
+- **AND** unread and flagged indicators SHALL reflect matching thread state while preserving the selected folder context.
+
+#### Scenario: Resize the email list column
+
+- **WHEN** the user drags the divider at the right edge of the email list
+- **THEN** the application SHALL resize the email list column with the mouse
+- **AND** it SHALL keep the folder sidebar and main pane usable
+- **AND** it SHALL persist the selected width locally across reloads.
+
 #### Scenario: Show knowledge badges
 
 - **WHEN** the sender of an email has an exact knowledge base entry
@@ -270,6 +284,20 @@ The application SHALL show the selected email and allow local-only triage action
 - **WHEN** the user selects an email
 - **THEN** the application SHALL show subject, sender, recipients, date, and body
 - **AND** it SHALL render email content safely for viewing.
+
+#### Scenario: Open a thread
+
+- **WHEN** the user selects a thread row from the email list
+- **THEN** the application SHALL show the locally available emails in that thread in the message pane
+- **AND** it SHALL identify the newest matching email as the reply target for actions such as draft generation, knowledge generation, todos, done, and spam
+- **AND** it SHALL collapse obvious quoted plain-text history where possible to reduce repeated conversation content.
+
+#### Scenario: Configure thread display order
+
+- **WHEN** the user changes the thread order setting
+- **THEN** the application SHALL allow choosing whether the newest email appears at the top or bottom inside an opened thread
+- **AND** the default SHALL be newest email at the top
+- **AND** the setting SHALL be saved in application configuration.
 
 #### Scenario: Open email links externally
 

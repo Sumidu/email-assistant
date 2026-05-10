@@ -87,6 +87,15 @@ applyFoldersCollapsed(localStorage.getItem("mail-folders-collapsed")==="1"||wind
 document.getElementById("folders-collapse").addEventListener("click",()=>applyFoldersCollapsed(true));
 document.getElementById("folders-rail").addEventListener("click",()=>applyFoldersCollapsed(false));
 
+function applyMailListWidth(width){
+  const n=Math.round(Number(width)||330);
+  const clamped=Math.max(240,Math.min(n,620));
+  appShell.style.setProperty("--maillist-col",`${clamped}px`);
+  localStorage.setItem("mail-list-width",String(clamped));
+}
+const savedMailListWidth=parseInt(localStorage.getItem("mail-list-width")||"",10);
+if(savedMailListWidth)applyMailListWidth(savedMailListWidth);
+
 // ─── Modal helpers ────────────────────────────────────────────────────────
 function updateModalOpenState(){
   document.body.classList.toggle("modal-open",!!document.querySelector(".modal-overlay.open"));
@@ -3220,6 +3229,32 @@ chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.
   document.addEventListener("mouseup",()=>{
     if(!active)return;active=false;
     resizer.classList.remove("dragging");
+    document.body.style.cursor="";document.body.style.userSelect="";
+  });
+})();
+
+(()=>{
+  const resizer=document.getElementById("maillist-resizer");
+  const maillist=document.getElementById("maillist");
+  if(!resizer||!maillist)return;
+  let active=false,startX=0,startW=0;
+  resizer.addEventListener("mousedown",e=>{
+    active=true;startX=e.clientX;startW=maillist.getBoundingClientRect().width;
+    resizer.classList.add("dragging");
+    appShell.classList.add("resizing-maillist");
+    document.body.style.cursor="col-resize";document.body.style.userSelect="none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove",e=>{
+    if(!active)return;
+    const dx=e.clientX-startX;
+    const maxW=Math.max(260,window.innerWidth-(appShell.classList.contains("folders-collapsed")?0:180)-420);
+    applyMailListWidth(Math.max(240,Math.min(startW+dx,maxW)));
+  });
+  document.addEventListener("mouseup",()=>{
+    if(!active)return;active=false;
+    resizer.classList.remove("dragging");
+    appShell.classList.remove("resizing-maillist");
     document.body.style.cursor="";document.body.style.userSelect="";
   });
 })();

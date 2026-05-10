@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='thread-order-20260510') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='maillist-resize-20260510') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -55,6 +55,7 @@
     </div>
     <div id="email-list"><div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Select a folder.</div></div>
     <div id="load-more" style="display:none;">&#8227; Load more…</div>
+    <div id="maillist-resizer" title="Resize mail list"></div>
   </section>
 
   <main id="main">
@@ -553,6 +554,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='thread-order-20260510') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='maillist-resize-20260510') }}"></script>
 </body>
 </html>

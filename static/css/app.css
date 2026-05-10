@@ -19,8 +19,9 @@
 html,body{height:100%;background:var(--bg0);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.45;overflow:hidden;-webkit-font-smoothing:antialiased;}
 
 /* ─── Layout ─────────────────────────────────────────────────────────────── */
-#app{display:grid;grid-template-rows:40px 1fr 26px;grid-template-columns:200px 300px minmax(0,1fr);grid-template-areas:"header header header" "folders maillist main" "statusbar statusbar statusbar";height:100%;transition:grid-template-columns .18s ease;}
-#app.folders-collapsed{grid-template-columns:0 300px minmax(0,1fr);}
+#app{--folders-col:200px;--maillist-col:300px;display:grid;grid-template-rows:40px 1fr 26px;grid-template-columns:var(--folders-col) var(--maillist-col) minmax(0,1fr);grid-template-areas:"header header header" "folders maillist main" "statusbar statusbar statusbar";height:100%;transition:grid-template-columns .18s ease;}
+#app.folders-collapsed{grid-template-columns:0 var(--maillist-col) minmax(0,1fr);}
+#app.resizing-maillist{transition:none;}
 
 /* ─── Header ─────────────────────────────────────────────────────────────── */
 #header{grid-area:header;background:var(--bg1);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:10px;}
@@ -108,7 +109,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .folder-item.selected .f-count{color:var(--bright);}
 
 /* ─── Mail list ──────────────────────────────────────────────────────────── */
-#maillist{grid-area:maillist;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+#maillist{grid-area:maillist;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;position:relative;}
 #maillist-header{padding:9px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;}
 #maillist-title{color:var(--text);font-size:11px;font-weight:bold;letter-spacing:1px;flex:1;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #email-count{color:var(--dim);font-size:9.5px;flex-shrink:0;}
@@ -145,6 +146,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .ei-spam-btn:hover{border-color:var(--red);color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent);}
 #load-more{padding:10px;text-align:center;color:var(--muted);font-size:10px;cursor:pointer;letter-spacing:1px;transition:color .12s;}
 #load-more:hover{color:var(--amber);}
+#maillist-resizer{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:8;background:transparent;transition:background .12s;}
+#maillist-resizer:hover,#maillist-resizer.dragging{background:color-mix(in srgb,var(--accent) 48%,transparent);}
 
 /* ─── Main area ──────────────────────────────────────────────────────────── */
 #main{grid-area:main;display:flex;flex-direction:column;overflow:hidden;background:var(--bg0);}
@@ -592,8 +595,8 @@ body.modal-open #progress-drawer{visibility:hidden;pointer-events:none;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;}
 
 /* ─── macOS visual refresh ───────────────────────────────────────────────── */
-#app{grid-template-rows:48px 1fr 30px;grid-template-columns:220px 330px minmax(0,1fr);}
-#app.folders-collapsed{grid-template-columns:0 330px minmax(0,1fr);}
+#app{--folders-col:220px;--maillist-col:330px;grid-template-rows:48px 1fr 30px;grid-template-columns:var(--folders-col) var(--maillist-col) minmax(0,1fr);}
+#app.folders-collapsed{grid-template-columns:0 var(--maillist-col) minmax(0,1fr);}
 #header{padding:0 16px;background:color-mix(in srgb,var(--bg1) 94%,transparent);backdrop-filter:saturate(180%) blur(18px);}
 .logo{font-size:15px;letter-spacing:.2px;text-transform:none;margin-right:10px;color:var(--bright);}
 .logo span{letter-spacing:0;font-size:12px;color:var(--muted);}
@@ -656,11 +659,11 @@ body.modal-open #progress-drawer{visibility:hidden;pointer-events:none;}
 #col-resizer:hover,#col-resizer.dragging{background:var(--accent);}
 
 @media (max-width: 950px){
-  #app{grid-template-columns:0 minmax(230px,38vw) minmax(0,1fr);}
+  #app{grid-template-columns:0 minmax(230px,min(var(--maillist-col),52vw)) minmax(0,1fr);}
   #app:not(.folders-open) #folders{border-right:none;pointer-events:none;}
   #app:not(.folders-open) #folders>*{visibility:hidden;}
   #folders-rail{display:block;}
-  #app.folders-open{grid-template-columns:minmax(180px,28vw) minmax(230px,36vw) minmax(0,1fr);}
+  #app.folders-open{grid-template-columns:minmax(180px,28vw) minmax(230px,min(var(--maillist-col),48vw)) minmax(0,1fr);}
   #header{padding:0 8px;gap:6px;}
   .logo span{display:none;}
   #search-wrap{max-width:220px;}
