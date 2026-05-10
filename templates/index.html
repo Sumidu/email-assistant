@@ -149,6 +149,30 @@
   </div>
 </div>
 
+<!-- ── Progress history modal ──────────────────────────────────────────────── -->
+<div id="history-modal" class="modal-overlay">
+  <div class="modal-box" style="width:560px;max-width:95vw;">
+    <div class="modal-header">
+      <span class="m-title">&#9670; Progress History</span>
+      <button class="modal-close" data-close="history-modal">&#215;</button>
+    </div>
+    <div id="history-range-tabs" style="display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <button class="history-tab active" data-days="7">7 days</button>
+      <button class="history-tab" data-days="30">30 days</button>
+    </div>
+    <div style="padding:20px 22px 18px;">
+      <div id="history-chart-wrap">
+        <svg id="history-chart" width="100%" height="160" style="display:block;overflow:visible;"></svg>
+      </div>
+      <div id="history-legend" style="display:flex;gap:16px;margin-top:10px;font-size:10px;color:var(--dim);justify-content:flex-end;">
+        <span><span class="hl-swatch" style="background:var(--green);"></span>Finished</span>
+        <span><span class="hl-swatch" style="background:var(--red);opacity:.7;"></span>Spam</span>
+      </div>
+      <div id="history-summary" style="margin-top:14px;font-size:11px;color:var(--muted);display:flex;gap:24px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Knowledge modal ────────────────────────────────────────────────────── -->
 <div id="kb-modal" class="modal-overlay">
   <div class="modal-box kb-modal-box">

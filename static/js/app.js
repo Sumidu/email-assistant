@@ -165,6 +165,135 @@ async function refreshFinishedToday(){
   }catch{}
 }
 
+// ─── Progress history chart ───────────────────────────────────────────────
+let historyDays=7;
+
+function renderHistoryChart(data){
+  const svg=document.getElementById("history-chart");
+  if(!svg)return;
+  const W=svg.getBoundingClientRect().width||516;
+  const H=160,padL=28,padR=8,padT=18,padB=28;
+  const chartW=W-padL-padR,chartH=H-padT-padB;
+  const maxVal=Math.max(1,...data.map(d=>d.total));
+  const today=new Date().toISOString().slice(0,10);
+  const barGap=Math.max(2,Math.round(chartW/data.length*0.18));
+  const barW=(chartW-barGap*(data.length-1))/data.length;
+
+  const ns="http://www.w3.org/2000/svg";
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.innerHTML="";
+
+  // Grid lines
+  [0.25,0.5,0.75,1].forEach(frac=>{
+    const y=padT+chartH*(1-frac);
+    const line=document.createElementNS(ns,"line");
+    line.setAttribute("x1",padL);line.setAttribute("x2",padL+chartW);
+    line.setAttribute("y1",y);line.setAttribute("y2",y);
+    line.setAttribute("stroke","var(--border)");line.setAttribute("stroke-width","1");
+    svg.appendChild(line);
+    const lbl=document.createElementNS(ns,"text");
+    lbl.setAttribute("x",padL-4);lbl.setAttribute("y",y+3);
+    lbl.setAttribute("text-anchor","end");
+    lbl.setAttribute("class","history-axis-label");
+    lbl.textContent=Math.round(maxVal*frac);
+    svg.appendChild(lbl);
+  });
+
+  data.forEach((d,i)=>{
+    const x=padL+i*(barW+barGap);
+    const isToday=d.date===today;
+    const finishedH=d.finished/maxVal*chartH;
+    const spamH=d.spam/maxVal*chartH;
+    const totalH=d.total/maxVal*chartH;
+
+    const g=document.createElementNS(ns,"g");
+    g.setAttribute("class","history-bar-group"+(isToday?" history-bar-today":""));
+
+    if(d.finished>0){
+      const r=document.createElementNS(ns,"rect");
+      r.setAttribute("x",x);r.setAttribute("width",barW);
+      r.setAttribute("y",padT+chartH-finishedH);r.setAttribute("height",finishedH);
+      r.setAttribute("rx","2");r.setAttribute("class","history-bar-finished");
+      g.appendChild(r);
+    }
+    if(d.spam>0){
+      const r=document.createElementNS(ns,"rect");
+      r.setAttribute("x",x);r.setAttribute("width",barW);
+      r.setAttribute("y",padT+chartH-finishedH-spamH);r.setAttribute("height",spamH);
+      r.setAttribute("rx","2");r.setAttribute("class","history-bar-spam");
+      g.appendChild(r);
+    }
+    if(d.total===0){
+      const r=document.createElementNS(ns,"rect");
+      r.setAttribute("x",x);r.setAttribute("width",barW);
+      r.setAttribute("y",padT+chartH-2);r.setAttribute("height",2);
+      r.setAttribute("rx","1");r.setAttribute("fill","var(--border)");
+      g.appendChild(r);
+    }
+
+    // value label above bar
+    if(d.total>0){
+      const lbl=document.createElementNS(ns,"text");
+      lbl.setAttribute("x",x+barW/2);
+      lbl.setAttribute("y",padT+chartH-totalH-4);
+      lbl.setAttribute("text-anchor","middle");
+      lbl.setAttribute("class","history-value-label");
+      lbl.textContent=d.total;
+      g.appendChild(lbl);
+    }
+
+    // date label
+    const dateLbl=document.createElementNS(ns,"text");
+    dateLbl.setAttribute("x",x+barW/2);dateLbl.setAttribute("y",H-4);
+    dateLbl.setAttribute("text-anchor","middle");
+    dateLbl.setAttribute("class","history-axis-label");
+    const dt=new Date(d.date+"T12:00:00");
+    const label=isToday?"Today":historyDays<=7
+      ?dt.toLocaleDateString(undefined,{weekday:"short"})
+      :dt.toLocaleDateString(undefined,{month:"numeric",day:"numeric"});
+    dateLbl.textContent=label;
+    if(isToday)dateLbl.setAttribute("fill","var(--green)");
+    g.appendChild(dateLbl);
+
+    svg.appendChild(g);
+  });
+}
+
+function updateHistorySummary(data){
+  const el=document.getElementById("history-summary");
+  if(!el)return;
+  const totalFinished=data.reduce((s,d)=>s+d.finished,0);
+  const totalSpam=data.reduce((s,d)=>s+d.spam,0);
+  const activeDays=data.filter(d=>d.total>0).length;
+  const avg=activeDays>0?(totalFinished+totalSpam)/activeDays:0;
+  el.innerHTML=`
+    <span><strong>${totalFinished+totalSpam}</strong>processed</span>
+    <span><strong>${totalFinished}</strong>finished</span>
+    <span><strong>${totalSpam}</strong>spam</span>
+    <span><strong>${avg.toFixed(1)}</strong>avg/active day</span>
+  `;
+}
+
+async function openHistoryModal(days){
+  historyDays=days||historyDays;
+  document.querySelectorAll(".history-tab").forEach(t=>{
+    t.classList.toggle("active",parseInt(t.dataset.days)===historyDays);
+  });
+  openModal("history-modal");
+  try{
+    const data=await fetch(`/api/stats/history?days=${historyDays}`).then(r=>r.json());
+    renderHistoryChart(data);
+    updateHistorySummary(data);
+  }catch(e){
+    document.getElementById("history-chart").innerHTML=`<text x="50%" y="50%" text-anchor="middle" fill="var(--dim)" font-size="11">Failed to load history</text>`;
+  }
+}
+
+document.getElementById("finished-today-count").addEventListener("click",()=>openHistoryModal());
+document.querySelectorAll(".history-tab").forEach(tab=>{
+  tab.addEventListener("click",()=>openHistoryModal(parseInt(tab.dataset.days)));
+});
+
 // ─── Floating tooltip ─────────────────────────────────────────────────────
 const floatingTooltip=document.createElement("div");
 floatingTooltip.id="floating-tooltip";

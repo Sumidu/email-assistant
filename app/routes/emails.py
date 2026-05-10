@@ -115,3 +115,10 @@ def mark_email_spam(email_id):
 @bp.route("/stats/today")
 def today_stats():
     return jsonify(database.get_processed_today_count())
+
+
+@bp.route("/stats/history")
+def completion_history():
+    from flask import request as req
+    days = min(max(int(req.args.get("days", 30)), 7), 90)
+    return jsonify(database.get_completion_history(days))
