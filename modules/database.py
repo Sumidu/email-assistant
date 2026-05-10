@@ -13,8 +13,9 @@ FINISHED_FOLDER = "Finished"
 
 def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
@@ -51,6 +52,8 @@ def init_db():
             imap_uid    INTEGER,
             uidvalidity TEXT,
             is_read     INTEGER DEFAULT 1,
+            is_flagged  INTEGER DEFAULT 0,
+            flags_synced_at TEXT,
             email_importance INTEGER,
             email_importance_note TEXT,
             email_importance_updated_at TEXT
@@ -96,6 +99,8 @@ def init_db():
     ensure_email_column("imap_uid", "imap_uid INTEGER")
     ensure_email_column("uidvalidity", "uidvalidity TEXT")
     ensure_email_column("is_read", "is_read INTEGER DEFAULT 1")
+    ensure_email_column("is_flagged", "is_flagged INTEGER DEFAULT 0")
+    ensure_email_column("flags_synced_at", "flags_synced_at TEXT")
     ensure_email_column("email_importance", "email_importance INTEGER")
     ensure_email_column("email_importance_note", "email_importance_note TEXT")
     ensure_email_column("email_importance_updated_at", "email_importance_updated_at TEXT")
@@ -175,9 +180,9 @@ def save_email(data):
         """INSERT OR REPLACE INTO emails
            (id, folder, subject, sender, recipients, date, date_ts,
             body_text, body_html, message_id, in_reply_to, fetched_at, account_id,
-            done_at, original_folder, imap_uid, uidvalidity, is_read,
+            done_at, original_folder, imap_uid, uidvalidity, is_read, is_flagged, flags_synced_at,
             email_importance, email_importance_note, email_importance_updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             data["id"],
             folder,
@@ -197,6 +202,8 @@ def save_email(data):
             data.get("imap_uid"),
             data.get("uidvalidity", ""),
             1 if data.get("is_read", True) else 0,
+            1 if data.get("is_flagged", False) else 0,
+            datetime.now().isoformat(),
             email_importance,
             email_importance_note,
             email_importance_updated_at,
@@ -222,7 +229,18 @@ def _apply_importance_filter(where: list[str], params: list, importance=None) ->
         params.append(rating)
 
 
-def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", importance=None):
+def _apply_status_filter(where: list[str], status=None) -> None:
+    status = str(status or "").strip().lower()
+    if status == "unread":
+        where.append("is_read = 0")
+    elif status == "flagged":
+        where.append("is_flagged = 1")
+    elif status in ("unread_flagged", "flagged_unread"):
+        where.append("is_read = 0")
+        where.append("is_flagged = 1")
+
+
+def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", importance=None, status=None):
     conn = get_connection()
     search = (search or "").strip()
     where = ["folder = ?"]
@@ -242,8 +260,9 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", i
         )
         params.extend([like, like, like, like])
     _apply_importance_filter(where, params, importance)
+    _apply_status_filter(where, status)
     params.extend([limit, offset])
-    sql = f"""SELECT id, folder, subject, sender, recipients, date, message_id, account_id, is_read, email_importance
+    sql = f"""SELECT id, folder, subject, sender, recipients, date, message_id, account_id, is_read, is_flagged, email_importance
               FROM emails WHERE {' AND '.join(where)}
               ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
               LIMIT ? OFFSET ?"""
@@ -252,18 +271,55 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", i
     return [dict(r) for r in rows]
 
 
-def update_email_read_status_by_uid(account_id: str, folder: str, uidvalidity: str, imap_uid: int, is_read: bool) -> None:
+def update_email_flags_by_uid(account_id: str, folder: str, uidvalidity: str, imap_uid: int, is_read: bool, is_flagged: bool) -> None:
     conn = get_connection()
     conn.execute(
-        """UPDATE emails SET is_read = ?
+        """UPDATE emails
+              SET is_read = ?,
+                  is_flagged = ?,
+                  flags_synced_at = ?
            WHERE account_id = ?
              AND uidvalidity = ?
              AND imap_uid = ?
              AND (folder = ? OR original_folder = ?)""",
-        (1 if is_read else 0, account_id, uidvalidity, imap_uid, folder, folder),
+        (1 if is_read else 0, 1 if is_flagged else 0, datetime.now().isoformat(), account_id, uidvalidity, imap_uid, folder, folder),
     )
     conn.commit()
     conn.close()
+
+
+def update_email_flags_batch(account_id: str, folder: str, uidvalidity: str, uid_flags: dict[int, dict]) -> int:
+    if not uidvalidity or not uid_flags:
+        return 0
+    conn = get_connection()
+    now = datetime.now().isoformat()
+    rows = [
+        (
+            1 if flags.get("is_read") else 0,
+            1 if flags.get("is_flagged") else 0,
+            now,
+            account_id,
+            uidvalidity,
+            int(uid),
+            folder,
+            folder,
+        )
+        for uid, flags in uid_flags.items()
+    ]
+    cur = conn.executemany(
+        """UPDATE emails
+              SET is_read = ?,
+                  is_flagged = ?,
+                  flags_synced_at = ?
+           WHERE account_id = ?
+             AND uidvalidity = ?
+             AND imap_uid = ?
+             AND (folder = ? OR original_folder = ?)""",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    return int(cur.rowcount or 0)
 
 
 def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
@@ -282,7 +338,7 @@ def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
     return cur.rowcount > 0
 
 
-def _email_filter_where(folder: str, account_id=None, search="", importance=None) -> tuple[list[str], list]:
+def _email_filter_where(folder: str, account_id=None, search="", importance=None, status=None) -> tuple[list[str], list]:
     where = ["folder = ?"]
     params = [folder]
     if account_id:
@@ -301,12 +357,13 @@ def _email_filter_where(folder: str, account_id=None, search="", importance=None
         )
         params.extend([like, like, like, like])
     _apply_importance_filter(where, params, importance)
+    _apply_status_filter(where, status)
     return where, params
 
 
-def count_emails_for_finish(folder: str, account_id=None, search="", importance=None) -> int:
+def count_emails_for_finish(folder: str, account_id=None, search="", importance=None, status=None) -> int:
     conn = get_connection()
-    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance)
+    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance, status=status)
     where.append("done_at IS NULL")
     count = conn.execute(
         f"SELECT COUNT(*) FROM emails WHERE {' AND '.join(where)}",
@@ -316,9 +373,9 @@ def count_emails_for_finish(folder: str, account_id=None, search="", importance=
     return int(count or 0)
 
 
-def mark_filtered_emails_done(folder: str, account_id=None, search="", importance=None) -> dict:
+def mark_filtered_emails_done(folder: str, account_id=None, search="", importance=None, status=None) -> dict:
     conn = get_connection()
-    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance)
+    where, params = _email_filter_where(folder, account_id=account_id, search=search, importance=importance, status=status)
     where.append("done_at IS NULL")
     ts = datetime.now().isoformat()
     cur = conn.execute(
@@ -408,6 +465,24 @@ def email_uid_exists(account_id: str, folder: str, uidvalidity: str, imap_uid: i
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def get_tracked_imap_uids(account_id: str, folder: str, uidvalidity: str, limit: int = 20000) -> list[int]:
+    if not uidvalidity:
+        return []
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT imap_uid FROM emails
+           WHERE account_id = ?
+             AND uidvalidity = ?
+             AND imap_uid IS NOT NULL
+             AND (folder = ? OR original_folder = ?)
+           ORDER BY imap_uid
+           LIMIT ?""",
+        (account_id, uidvalidity, folder, folder, int(limit or 20000)),
+    ).fetchall()
+    conn.close()
+    return [int(row["imap_uid"]) for row in rows if row["imap_uid"] is not None]
 
 
 def remove_missing_remote_emails(account_id: str, folder: str, uidvalidity: str, remote_uids: set[int]) -> int:

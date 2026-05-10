@@ -20,6 +20,7 @@ def _compact_email(row: dict) -> str:
     body = re.sub(r"\s+", " ", row.get("body_text") or "").strip()
     recipients = row.get("recipients") or ""
     return "\n".join([
+        "BEGIN UNTRUSTED EMAIL CONTENT",
         f"Source number: {row.get('__summary_index')}",
         f"ID: {row.get('id')}",
         f"Folder: {row.get('folder') or ''}",
@@ -30,6 +31,7 @@ def _compact_email(row: dict) -> str:
         f"To/Cc: {recipients}",
         f"Date: {row.get('date') or ''}",
         f"Body: {body[:1300]}",
+        "END UNTRUSTED EMAIL CONTENT",
     ])
 
 
@@ -42,10 +44,15 @@ def _summary_knowledge_context() -> str:
         category = item.get("category", "")
         if category != "other":
             continue
-        content = (item.get("content") or "").strip()
+        full = rt.kb.read_knowledge_file(name) if hasattr(rt.kb, "read_knowledge_file") else {}
+        content = (full.get("content") or item.get("content") or "").strip()
         if not content:
             continue
-        chunks.append(f"=== {name} ===\n{content[:2200]}")
+        chunks.append(
+            f"=== BEGIN UNTRUSTED KNOWLEDGE BASE CONTENT: {name} ===\n"
+            f"{content[:2200]}\n"
+            f"=== END UNTRUSTED KNOWLEDGE BASE CONTENT: {name} ==="
+        )
     return "\n\n".join(chunks)[:9000]
 
 
@@ -281,7 +288,7 @@ def mail_summary():
         })
 
     prompts = prompt_defaults.ensure_prompts(rt.config)
-    system = prompts["mail_summary_system"]
+    system = prompt_defaults.with_untrusted_context_rules(prompts["mail_summary_system"])
     knowledge = _summary_knowledge_context()
     email_text = "\n\n--- EMAIL ---\n\n".join(_compact_email(row) for row in rows)
     user_prompt = f"""Timeframe: {start_date} to {end_date}
@@ -292,8 +299,9 @@ Each email has a Source number and an ID. In source_ids, prefer the exact ID. If
 KNOWLEDGE ABOUT WHAT MATTERS TO THE USER:
 {knowledge or "(No priority knowledge found.)"}
 
-UNFINISHED EMAILS:
+BEGIN UNTRUSTED EMAIL COLLECTION
 {email_text[:24000]}
+END UNTRUSTED EMAIL COLLECTION
 """
 
     lm = llm_providers.get_active_llm(rt.config)

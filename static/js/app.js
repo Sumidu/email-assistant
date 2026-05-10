@@ -77,18 +77,33 @@ document.getElementById("folders-collapse").addEventListener("click",()=>applyFo
 document.getElementById("folders-rail").addEventListener("click",()=>applyFoldersCollapsed(false));
 
 // ─── Modal helpers ────────────────────────────────────────────────────────
-function openModal(id){document.getElementById(id).classList.add("open");}
-function closeModal(id){document.getElementById(id).classList.remove("open");}
+function updateModalOpenState(){
+  document.body.classList.toggle("modal-open",!!document.querySelector(".modal-overlay.open"));
+}
+function openModal(id){
+  document.getElementById(id).classList.add("open");
+  updateModalOpenState();
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove("open");
+  updateModalOpenState();
+}
 document.querySelectorAll(".modal-close,[data-close]").forEach(el=>{
   el.addEventListener("click",()=>closeModal(el.dataset.close||el.closest(".modal-overlay").id));
 });
 document.querySelectorAll(".modal-overlay").forEach(o=>{
   o.addEventListener("click",e=>{
-    if(e.target===o&&o.id!=="settings-modal")o.classList.remove("open");
+    if(e.target===o&&o.id!=="settings-modal"){
+      o.classList.remove("open");
+      updateModalOpenState();
+    }
   });
 });
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape")document.querySelectorAll(".modal-overlay.open").forEach(m=>m.classList.remove("open"));
+  if(e.key==="Escape"){
+    document.querySelectorAll(".modal-overlay.open").forEach(m=>m.classList.remove("open"));
+    updateModalOpenState();
+  }
 });
 
 // ─── Tab nav ──────────────────────────────────────────────────────────────
@@ -149,8 +164,10 @@ function positionFloatingTooltip(anchor){
 
 function showFloatingTooltip(anchor){
   const text=anchor.dataset.tip||anchor.getAttribute("title")||"";
-  if(!text)return;
-  floatingTooltip.textContent=text;
+  const html=anchor.dataset.tipHtml||"";
+  if(!text&&!html)return;
+  if(html)floatingTooltip.innerHTML=html;
+  else floatingTooltip.textContent=text;
   floatingTooltip.classList.add("open");
   positionFloatingTooltip(anchor);
 }
@@ -251,6 +268,7 @@ const emailCount=document.getElementById("email-count"),emailListEl=document.get
 const finishFilteredBtn=document.getElementById("btn-finish-filtered");
 const searchInput=document.getElementById("search-input");
 const importanceFilter=document.getElementById("importance-filter");
+const statusFilter=document.getElementById("status-filter");
 
 async function loadFolders(){
   try{
@@ -359,10 +377,11 @@ async function loadEmailList(append=false,{preserveSelection=false,clearMissingS
     });
     if(q)qs.set("q",q);
     if(importanceFilter.value)qs.set("importance",importanceFilter.value);
+    if(statusFilter.value)qs.set("status",statusFilter.value);
     const emails=await fetch(`/api/emails?${qs.toString()}`).then(r=>r.json());
     if(!append)allEmailsLocal=emails;else allEmailsLocal=allEmailsLocal.concat(emails);
     const hasMore=emails.length>=PAGE_SIZE;
-    const filtered=q||importanceFilter.value;
+    const filtered=q||importanceFilter.value||statusFilter.value;
     emailCount.textContent=filtered
       ?`${allEmailsLocal.length}${hasMore?"+":""} found`
       :(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
@@ -401,8 +420,9 @@ function renderEmailList(emails,append=false){
       ?`<button class="ei-spam-btn" data-spam-id="${escHtml(e.id)}" title="Move to Spam/Junk">&#128683;</button>`
       :"";
     const readFlag=(e.is_read===0||e.is_read===false)?'<span class="ei-unread-dot" title="Unread"></span>':"";
+    const flagged=(e.is_flagged===1||e.is_flagged===true)?'<span class="ei-flagged" title="Flagged">&#9873;</span>':"";
     const importance=e.email_importance?`<span class="ei-importance" title="${e.email_importance} star importance">${"★".repeat(Number(e.email_importance))}</span>`:"";
-    div.innerHTML=`<div class="ei-main"><div class="ei-from">${readFlag}<span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span>${importance}</div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
+    div.innerHTML=`<div class="ei-main"><div class="ei-from">${readFlag}${flagged}<span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span>${importance}</div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
     div.addEventListener("click",()=>openEmail(e.id,div));
     div.querySelector("[data-kb-file]")?.addEventListener("click",ev=>{ev.stopPropagation();openKnowledge(ev.currentTarget.dataset.kbFile);});
     div.querySelector("[data-finish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailDone(e.id,{fromList:true});});
@@ -418,6 +438,7 @@ function currentEmailListPayload(extra={}){
     account_id:currentAccountId||"",
     q:searchInput.value.trim(),
     importance:importanceFilter.value,
+    status:statusFilter.value,
     ...extra,
   };
 }
@@ -436,11 +457,13 @@ async function finishFilteredEmails(){
     const label=folderDisplayName(currentFolder);
     const q=searchInput.value.trim();
     const importance=importanceFilter.value;
+    const status=statusFilter.value;
+    const statusLabel={unread:"unread",flagged:"flagged",unread_flagged:"unread + flagged"}[status]||"";
     const msg=[
       `Mark ${count} email${count===1?"":"s"} as finished?`,
       "",
-      [q?`search: "${q}"`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).length
-        ?`Folder: ${label}, ${[q?`search: "${q}"`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).join(", ")}`
+      [q?`search: "${q}"`:"",statusLabel?`status: ${statusLabel}`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).length
+        ?`Folder: ${label}, ${[q?`search: "${q}"`:"",statusLabel?`status: ${statusLabel}`:"",importance?`importance: ${importance==="unrated"?"unrated":importance+" star"}`:""].filter(Boolean).join(", ")}`
         :`Folder: ${label}`,
       "This is local-only and does not mutate the remote IMAP mailbox.",
     ].join("\n");
@@ -470,6 +493,10 @@ searchInput.addEventListener("input",()=>{
   },220);
 });
 importanceFilter.addEventListener("change",()=>{
+  emailOffset=0;
+  loadEmailList(false,{clearMissingSelection:true});
+});
+statusFilter.addEventListener("change",()=>{
   emailOffset=0;
   loadEmailList(false,{clearMissingSelection:true});
 });
@@ -506,8 +533,9 @@ async function openEmail(id,el){
     loadSuggestedContext(data);
     emailSubject.textContent=data.subject||"(no subject)";emailSubject.style.color="";
     const readLabel=(data.is_read===0||data.is_read===false)?"Unread":"Read";
+    const flaggedLabel=(data.is_flagged===1||data.is_flagged===true)?"Flagged":"Not flagged";
     const importanceLabel=data.email_importance?`${data.email_importance}/5`:"Unrated";
-    emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}&nbsp;&nbsp;<strong>Status:</strong> ${readLabel}&nbsp;&nbsp;<strong>Importance:</strong> ${importanceLabel}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
+    emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}&nbsp;&nbsp;<strong>Status:</strong> ${readLabel} / ${flaggedLabel}&nbsp;&nbsp;<strong>Importance:</strong> ${importanceLabel}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
     const html=(data.body_html||"").trim();
     const text=(data.body_text||"").trim();
     if(html){
@@ -630,15 +658,116 @@ generateContactKbBtn.addEventListener("click",async()=>{
 });
 
 function sanitizeEmailHtml(raw){
-  // Strip scripts, on* handlers, external tracking pixels; keep layout/text
-  let h=raw
-    .replace(/<script[\s\S]*?<\/script>/gi,"")
-    .replace(/<style[\s\S]*?<\/style>/gi,"")
-    .replace(/\son\w+\s*=\s*(['"])[^'"]*\1/gi,"")
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi,"")
-    .replace(/<img[^>]+src=['"]https?:\/\/[^'"]*track[^'"]*['"][^>]*>/gi,"")
-    .replace(/javascript:/gi,"");
-  return h;
+  const template=document.createElement("template");
+  template.innerHTML=String(raw||"");
+  const blockedTags=new Set([
+    "script","style","iframe","object","embed","applet","base","meta","link",
+    "form","input","button","textarea","select","option","svg","math","canvas",
+    "video","audio","source","track",
+  ]);
+  const allowedAttrs=new Set([
+    "href","title","alt","name","colspan","rowspan","headers","scope",
+    "width","height","align","valign","aria-label","style",
+  ]);
+  const safeUrlAttrs=new Set(["href"]);
+  const safeProtocols=new Set(["http:","https:","mailto:"]);
+  const comments=document.createTreeWalker(template.content,NodeFilter.SHOW_COMMENT);
+  const commentNodes=[];
+  while(comments.nextNode())commentNodes.push(comments.currentNode);
+  commentNodes.forEach(node=>node.remove());
+
+  function blockedImageLabel(img){
+    const alt=(img.getAttribute("alt")||img.getAttribute("title")||"Remote image").trim();
+    const span=document.createElement("span");
+    span.className="blocked-email-image";
+    span.textContent=`[${alt} blocked]`;
+    return span;
+  }
+
+  function sanitizeStyle(value){
+    const allowedProps=new Set([
+      "border","border-left","border-right","border-top","border-bottom",
+      "border-collapse","border-spacing","border-radius",
+      "display","font-size","font-style","font-weight","height","line-height",
+      "margin","margin-left","margin-right","margin-top","margin-bottom",
+      "max-width","min-width","padding","padding-left","padding-right",
+      "padding-top","padding-bottom","text-align","text-decoration",
+      "vertical-align","white-space","width",
+    ]);
+    const safe=[];
+    String(value||"").split(";").forEach(part=>{
+      const idx=part.indexOf(":");
+      if(idx<1)return;
+      const prop=part.slice(0,idx).trim().toLowerCase();
+      const val=part.slice(idx+1).trim();
+      if(!allowedProps.has(prop)||!val)return;
+      const lower=val.toLowerCase();
+      if(lower.includes("url(")||lower.includes("expression(")||lower.includes("javascript:"))return;
+      if(/[{}<>]/.test(val))return;
+      safe.push(`${prop}: ${val}`);
+    });
+    return safe.join("; ");
+  }
+
+  function sanitizeNode(node){
+    if(node.nodeType!==Node.ELEMENT_NODE)return;
+    const tag=node.tagName.toLowerCase();
+    if(blockedTags.has(tag)){
+      node.remove();
+      return;
+    }
+    if(tag==="img"){
+      const src=(node.getAttribute("src")||"").trim();
+      const safeInline=/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(src);
+      if(!safeInline){
+        node.replaceWith(blockedImageLabel(node));
+        return;
+      }
+      node.removeAttribute("srcset");
+      node.loading="lazy";
+      node.decoding="async";
+    }
+    [...node.attributes].forEach(attr=>{
+      const name=attr.name.toLowerCase();
+      const value=attr.value||"";
+      if(name.startsWith("on")||name==="srcset"||name==="background"||name==="formaction"){
+        node.removeAttribute(attr.name);
+        return;
+      }
+      if(name==="style"){
+        const style=sanitizeStyle(value);
+        if(style)node.setAttribute("style",style);
+        else node.removeAttribute(attr.name);
+        return;
+      }
+      if(tag!=="img"&&name==="src"){
+        node.removeAttribute(attr.name);
+        return;
+      }
+      if(name.startsWith("data-")||name.startsWith("xlink:")){
+        node.removeAttribute(attr.name);
+        return;
+      }
+      if(safeUrlAttrs.has(name)){
+        try{
+          const url=new URL(value,window.location.href);
+          if(!safeProtocols.has(url.protocol)){
+            node.removeAttribute(attr.name);
+            return;
+          }
+          node.setAttribute(attr.name,url.href);
+        }catch{
+          node.removeAttribute(attr.name);
+          return;
+        }
+      }else if(!allowedAttrs.has(name)&&!(tag==="img"&&name==="src")){
+        node.removeAttribute(attr.name);
+      }
+    });
+  }
+
+  [...template.content.querySelectorAll("*")].forEach(sanitizeNode);
+  return template.innerHTML;
 }
 
 function prepareExternalEmailLinks(container){
@@ -1770,24 +1899,73 @@ async function loadAccountInfoTip(el){
     const id=el.dataset.accountInfo;
     const data=await fetch(`/api/accounts/${encodeURIComponent(id)}/stats`).then(r=>r.json());
     const acct=accountsCache.find(a=>a.id===id);
-    const folders=(data.folders||[]).slice(0,4).map(f=>`${f.folder}: ${f.count}`).join("\n");
-    const states=(data.sync_state||[]).filter(s=>s.last_sync_at).slice(0,2).map(s=>`${s.folder}: ${new Date(s.last_sync_at).toLocaleString()}`).join("\n");
+    const folders=(data.folders||[]).slice(0,5);
+    const states=(data.sync_state||[]).filter(s=>s.last_sync_at).slice(0,3);
+    const provider=acct?.imap?.detected_provider||{};
+    const override=acct?.imap?.provider_override&&acct.imap.provider_override!=="auto"?acct.imap.provider_override:"auto";
+    const calendarLabel=acct?.imap?.calendar_enabled?`On · ${acct.imap.calendar_method||"ics"}`:"Off";
+    const autoSyncLabel=acct?.imap?.auto_sync?`Every ${acct.imap.sync_interval_minutes||5} min`:"Off";
     el.dataset.tip=[
       acct?.name||id,
       `${data.email_count||0} local emails`,
       `Approx. account data: ${formatBytes(data.approx_account_bytes)}`,
       `Database file: ${formatBytes(data.database_file_bytes)}`,
-      acct?.imap?.detected_provider?.name?`Detected provider: ${acct.imap.detected_provider.name} (${acct.imap.detected_provider.confidence||"unknown"} confidence)`:"",
-      acct?.imap?.provider_override&&acct.imap.provider_override!=="auto"?`Provider override: ${acct.imap.provider_override}`:"Provider override: auto",
-      acct?.imap?.calendar_enabled?`Calendar: enabled (${acct.imap.calendar_method||"ics"})`:"Calendar: off",
+      provider.name?`Detected provider: ${provider.name} (${provider.confidence||"unknown"} confidence)`:"",
+      `Provider override: ${override}`,
+      `Calendar: ${calendarLabel}`,
       acct?.imap?.sync_mode?`Mode: ${acct.imap.sync_mode}`:"",
-      acct?.imap?.auto_sync?`Auto-sync: every ${acct.imap.sync_interval_minutes||5} min`:"Auto-sync: off",
-      folders?`\nFolders:\n${folders}`:"",
-      states?`\nLast sync:\n${states}`:"",
+      `Auto-sync: ${autoSyncLabel}`,
+      folders.length?`\nFolders:\n${folders.map(f=>`${f.folder}: ${f.count}`).join("\n")}`:"",
+      states.length?`\nLast sync:\n${states.map(s=>`${s.folder}: ${new Date(s.last_sync_at).toLocaleString()}`).join("\n")}`:"",
     ].filter(Boolean).join("\n");
+    el.dataset.tipHtml=accountInfoTooltipHtml({
+      name:acct?.name||id,
+      emailCount:data.email_count||0,
+      accountBytes:data.approx_account_bytes,
+      dbBytes:data.database_file_bytes,
+      provider,
+      override,
+      calendarLabel,
+      syncMode:acct?.imap?.sync_mode||"",
+      autoSyncLabel,
+      folders,
+      states,
+    });
   }catch{
     el.dataset.tip="Could not load account info.";
+    el.dataset.tipHtml="";
   }
+}
+
+function accountInfoTooltipHtml(info){
+  const folderRows=(info.folders||[]).map(f=>`
+    <span class="tip-pill"><span>${escHtml(folderDisplayName(f.folder))}</span><strong>${escHtml(String(f.count||0))}</strong></span>
+  `).join("");
+  const syncRows=(info.states||[]).map(s=>`
+    <span class="tip-pill"><span>${escHtml(folderDisplayName(s.folder))}</span><strong>${escHtml(formatLogTime(new Date(s.last_sync_at)))}</strong></span>
+  `).join("");
+  const providerName=info.provider?.name||"Generic IMAP";
+  const providerConfidence=info.provider?.confidence||"unknown";
+  return `
+    <div class="tip-card">
+      <div class="tip-head">
+        <div class="tip-icon">i</div>
+        <div><div class="tip-title">${escHtml(info.name)}</div><div class="tip-subtitle">${escHtml(providerName)} · ${escHtml(providerConfidence)}</div></div>
+      </div>
+      <div class="tip-metrics">
+        <div><strong>${escHtml(String(info.emailCount||0))}</strong><span>Emails</span></div>
+        <div><strong>${escHtml(formatBytes(info.accountBytes))}</strong><span>Account</span></div>
+        <div><strong>${escHtml(formatBytes(info.dbBytes))}</strong><span>DB file</span></div>
+      </div>
+      <div class="tip-chips">
+        <span>${escHtml(info.syncMode||"recent")}</span>
+        <span>Auto ${escHtml(info.autoSyncLabel)}</span>
+        <span>Calendar ${escHtml(info.calendarLabel)}</span>
+        <span>Override ${escHtml(info.override)}</span>
+      </div>
+      ${folderRows?`<div class="tip-section compact"><div class="tip-section-title">Folders</div><div class="tip-pill-grid">${folderRows}</div></div>`:""}
+      ${syncRows?`<div class="tip-section compact"><div class="tip-section-title">Last sync</div><div class="tip-pill-grid">${syncRows}</div></div>`:""}
+    </div>`;
 }
 
 function _populateAccountForm(acct){

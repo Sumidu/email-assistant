@@ -162,11 +162,57 @@ class IMAPFetcher:
         return b" ".join(chunks)
 
     @classmethod
-    def _is_read_from_fetch_response(cls, fetch_data) -> bool:
+    def _flags_from_fetch_response(cls, fetch_data) -> set[bytes]:
         flags_blob = cls._fetch_response_flags(fetch_data)
         match = re.search(br"FLAGS \(([^)]*)\)", flags_blob, flags=re.IGNORECASE)
-        flags = match.group(1).lower().split() if match else []
-        return b"\\seen" in flags
+        return set(match.group(1).lower().split()) if match else set()
+
+    @classmethod
+    def _is_read_from_fetch_response(cls, fetch_data) -> bool:
+        return b"\\seen" in cls._flags_from_fetch_response(fetch_data)
+
+    @classmethod
+    def _is_flagged_from_fetch_response(cls, fetch_data) -> bool:
+        return b"\\flagged" in cls._flags_from_fetch_response(fetch_data)
+
+    @staticmethod
+    def _parse_uid_flags(fetch_data) -> dict[int, dict]:
+        parsed = {}
+        for item in fetch_data or []:
+            if isinstance(item, tuple):
+                blob = item[0] if isinstance(item[0], bytes) else str(item[0]).encode()
+            elif isinstance(item, bytes):
+                blob = item
+            else:
+                continue
+            uid_match = re.search(br"\bUID\s+(\d+)\b", blob, flags=re.IGNORECASE)
+            flags_match = re.search(br"FLAGS\s+\(([^)]*)\)", blob, flags=re.IGNORECASE)
+            if not uid_match or not flags_match:
+                continue
+            flags = set(flags_match.group(1).lower().split())
+            parsed[int(uid_match.group(1))] = {
+                "is_read": b"\\seen" in flags,
+                "is_flagged": b"\\flagged" in flags,
+            }
+        return parsed
+
+    def _sync_folder_flags(self, conn, folder_name: str, uidvalidity: str) -> int:
+        """Mirror remote IMAP read/flagged state without downloading bodies."""
+        if not uidvalidity:
+            return 0
+        tracked_uids = database.get_tracked_imap_uids(self.account_id, folder_name, uidvalidity)
+        if not tracked_uids:
+            return 0
+        updated = 0
+        chunk_size = 200
+        for idx in range(0, len(tracked_uids), chunk_size):
+            uid_set = ",".join(str(uid) for uid in tracked_uids[idx:idx + chunk_size])
+            status, flag_data = conn.uid("fetch", uid_set, "(UID FLAGS)")
+            if status != "OK" or not flag_data:
+                continue
+            uid_flags = self._parse_uid_flags(flag_data)
+            updated += database.update_email_flags_batch(self.account_id, folder_name, uidvalidity, uid_flags)
+        return updated
 
     @staticmethod
     def _raw_message_from_fetch_response(fetch_data):
@@ -192,6 +238,7 @@ class IMAPFetcher:
         removed = 0
         if remote_uids is not None:
             removed = database.remove_missing_remote_emails(self.account_id, folder_name, uidvalidity, remote_uids)
+        flags_updated = self._sync_folder_flags(conn, folder_name, uidvalidity)
         mode = "all" if full_resync else self.imap_cfg.get("sync_mode", "recent")
         since_date = self.imap_cfg.get("sync_since", "")
         state = database.get_sync_state(self.account_id, folder_name)
@@ -210,17 +257,19 @@ class IMAPFetcher:
                 if uidvalidity and database.email_uid_exists(self.account_id, folder_name, uidvalidity, uid_int):
                     if full_resync:
                         _, flag_data = conn.uid("fetch", uid, "(FLAGS)")
-                        database.update_email_read_status_by_uid(
+                        database.update_email_flags_by_uid(
                             self.account_id,
                             folder_name,
                             uidvalidity,
                             uid_int,
                             self._is_read_from_fetch_response(flag_data),
+                            self._is_flagged_from_fetch_response(flag_data),
                         )
                     continue
 
                 _, msg_data = conn.uid("fetch", uid, "(FLAGS RFC822)")
                 is_read = self._is_read_from_fetch_response(msg_data)
+                is_flagged = self._is_flagged_from_fetch_response(msg_data)
                 raw = self._raw_message_from_fetch_response(msg_data)
                 if not raw:
                     raise ValueError("No RFC822 payload returned")
@@ -270,6 +319,7 @@ class IMAPFetcher:
                     "imap_uid":   uid_int,
                     "uidvalidity": uidvalidity,
                     "is_read":    is_read,
+                    "is_flagged": is_flagged,
                 })
                 count += 1
 
@@ -279,7 +329,7 @@ class IMAPFetcher:
 
         if uids:
             database.save_sync_state(self.account_id, folder_name, uidvalidity, max_seen_uid)
-        return {"fetched": count, "removed": removed, "remote": len(remote_uids) if remote_uids is not None else None}
+        return {"fetched": count, "removed": removed, "flags_updated": flags_updated, "remote": len(remote_uids) if remote_uids is not None else None}
 
     # ---- IMAP folder discovery ---------------------------------------------
 

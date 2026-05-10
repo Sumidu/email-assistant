@@ -55,12 +55,12 @@ Effort scale:
 
 ### M-L
 
-- [ ] Harden protection against email exploits
+- [x] Harden protection against email exploits
   - Category: Security
   - Clarification: Strengthen HTML sanitizing, block remote tracking images, remove scripts/styles/event handlers, ensure links open externally, and consider a plain-text mode.
   - Notes: Critical before sharing the app more broadly.
 
-- [ ] Harden prompts against prompt injection and jailbreaks from email content
+- [x] Harden prompts against prompt injection and jailbreaks from email content
   - Category: Security / LLM
   - Clarification: Mark email content as untrusted, isolate system instructions from email text, and explicitly instruct the LLM not to follow instructions found inside emails.
   - Notes: Cannot be perfect, but can materially reduce risk.

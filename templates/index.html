@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='theme-system-20260509') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='metric-box-tooltip-20260510') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -36,6 +36,12 @@
     <div id="maillist-header">
       <span id="maillist-title">Inbox</span>
       <span id="email-count">—</span>
+      <select id="status-filter" title="Filter by read / flagged status">
+        <option value="">All</option>
+        <option value="unread">Unread</option>
+        <option value="flagged">Flagged</option>
+        <option value="unread_flagged">Unread + Flagged</option>
+      </select>
       <select id="importance-filter" title="Filter by email importance">
         <option value="">All</option>
         <option value="5">★★★★★</option>
@@ -539,6 +545,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='theme-system-20260509') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='metric-box-tooltip-20260510') }}"></script>
 </body>
 </html>

@@ -910,12 +910,14 @@ class KnowledgeBuilder:
 
         sample = sent_emails[:60]
         snippets = "\n\n---EMAIL---\n".join(
-            f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:500]}"
+            "BEGIN UNTRUSTED EMAIL CONTENT\n"
+            f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:500]}\n"
+            "END UNTRUSTED EMAIL CONTENT"
             for e in sample
         )
 
         prompts = prompt_defaults.ensure_prompts(self.config)
-        system = prompts["knowledge_style_system"]
+        system = prompt_defaults.with_untrusted_context_rules(prompts["knowledge_style_system"])
         user = prompt_defaults.render_prompt(
             prompts["knowledge_style_user"],
             {"snippets": snippets[:9000]},
@@ -938,12 +940,16 @@ class KnowledgeBuilder:
         my_replies   = data["my_replies"][:12]
 
         from_text = "\n\n---\n".join(
-            f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:400]}"
+            "BEGIN UNTRUSTED EMAIL CONTENT\n"
+            f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:400]}\n"
+            "END UNTRUSTED EMAIL CONTENT"
             for e in emails_from
         )
         reply_text = (
             "\n\n---\n".join(
-                f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:400]}"
+                "BEGIN UNTRUSTED EMAIL CONTENT\n"
+                f"Subject: {e.get('subject','')}\n{e.get('body_text','')[:400]}\n"
+                "END UNTRUSTED EMAIL CONTENT"
                 for e in my_replies
             )
             if my_replies
@@ -951,7 +957,7 @@ class KnowledgeBuilder:
         )
 
         prompts = prompt_defaults.ensure_prompts(self.config)
-        system = prompts["knowledge_contact_system"]
+        system = prompt_defaults.with_untrusted_context_rules(prompts["knowledge_contact_system"])
         user = prompt_defaults.render_prompt(
             prompts["knowledge_contact_user"],
             {
