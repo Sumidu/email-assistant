@@ -24,7 +24,7 @@ DEFAULT_CONFIG = {
     },
     "llms": [llm_providers.default_provider()],
     "default_llm_id": "lm_studio",
-    "app": {"port": 5100, "active_llm_id": "lm_studio", "theme_mode": "system"},
+    "app": {"port": 5100, "active_llm_id": "lm_studio", "theme_mode": "system", "thread_order": "newest_first"},
     "prompts": prompt_defaults.prompt_defaults(),
     "quick_templates": quick_templates.quick_template_defaults(),
 }
@@ -166,6 +166,7 @@ def portable_config(config: dict) -> dict:
         "port": config.get("app", {}).get("port", 5100),
         "active_llm_id": config.get("app", {}).get("active_llm_id", config.get("default_llm_id", "")),
         "theme_mode": config.get("app", {}).get("theme_mode", "system"),
+        "thread_order": config.get("app", {}).get("thread_order", "newest_first"),
     }
     return {
         "kind": "email-assistant-portable-config",
@@ -225,7 +226,7 @@ def apply_portable_config(current: dict, incoming: dict) -> dict:
         imported["default_llm_id"] = incoming.get("default_llm_id") or ""
     if "app" in incoming:
         app_config = imported.setdefault("app", {})
-        for key in ("port", "active_llm_id", "theme_mode"):
+        for key in ("port", "active_llm_id", "theme_mode", "thread_order"):
             if key in incoming["app"]:
                 app_config[key] = incoming["app"][key]
     if "prompts" in incoming:
@@ -270,6 +271,8 @@ def migrate_config(config: dict) -> dict:
     app = config.setdefault("app", {})
     theme_mode = str(app.get("theme_mode") or "system").lower()
     app["theme_mode"] = theme_mode if theme_mode in {"system", "light", "dark"} else "system"
+    thread_order = str(app.get("thread_order") or "newest_first").lower()
+    app["thread_order"] = thread_order if thread_order in {"newest_first", "oldest_first"} else "newest_first"
     return config
 
 

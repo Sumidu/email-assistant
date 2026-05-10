@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='thread-view-20260510') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='thread-order-20260510') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -384,6 +384,14 @@
           </select>
           <div class="field-hint">System follows the current macOS light/dark appearance and updates when it changes.</div>
         </div>
+        <div class="field-group">
+          <label>Thread order</label>
+          <select id="cfg-thread-order" autocomplete="off">
+            <option value="newest_first">Newest email at the top</option>
+            <option value="oldest_first">Newest email at the bottom</option>
+          </select>
+          <div class="field-hint">Controls only the order inside the opened thread. The mail list still shows the newest thread first.</div>
+        </div>
         <div class="section-label">LLM Prompts</div>
         <div class="field-hint prompt-hint">Use placeholders like <code>&lbrace;&lbrace;kb_text&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;snippets&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;addr&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;display_name&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;received_count&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;replied_count&rbrace;&rbrace;</code>, <code>&lbrace;&lbrace;from_text&rbrace;&rbrace;</code>, and <code>&lbrace;&lbrace;reply_text&rbrace;&rbrace;</code> where needed.</div>
         <div class="prompt-actions">
@@ -545,6 +553,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='thread-view-20260510') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='thread-order-20260510') }}"></script>
 </body>
 </html>

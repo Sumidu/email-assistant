@@ -10,6 +10,7 @@ let autoSyncTimer=null,lastAutoSyncAt={};
 let discoveredFolders=[];  // from IMAP discovery
 let calendarEvents=[];
 let calendarWeekStart=null;
+let threadOrder="newest_first";
 
 // ─── Theme ────────────────────────────────────────────────────────────────
 const html=document.documentElement,themeToggle=document.getElementById("theme-toggle");
@@ -34,6 +35,16 @@ function applyThemeMode(mode,{persist=true}={}){
   if(persist)localStorage.setItem("mail-theme-mode",themeMode);
   const select=document.getElementById("cfg-theme-mode");
   if(select)select.value=themeMode;
+}
+function normalizedThreadOrder(value){
+  value=String(value||"newest_first").toLowerCase();
+  return value==="oldest_first"?"oldest_first":"newest_first";
+}
+function applyThreadOrder(value){
+  threadOrder=normalizedThreadOrder(value);
+  const select=document.getElementById("cfg-thread-order");
+  if(select)select.value=threadOrder;
+  if(currentThreadEmails.length)renderThreadMessages(currentThreadEmails);
 }
 async function persistThemeMode(mode){
   try{
@@ -538,13 +549,14 @@ function renderPlainThreadBody(text){
 }
 
 function renderThreadMessages(emails){
-  if(!emails.length){
+  const ordered=threadOrder==="newest_first"?[...emails].reverse():[...emails];
+  if(!ordered.length){
     emailBody.className="placeholder";
     emailBody.textContent="No messages in this thread.";
     return;
   }
   emailBody.className="thread-view";
-  emailBody.innerHTML=emails.map((mail,idx)=>{
+  emailBody.innerHTML=ordered.map((mail,idx)=>{
     const isCurrent=currentEmail&&mail.id===currentEmail.id;
     const isSent=(mail.folder||"").toLowerCase().includes("sent")||(mail.folder||"").toLowerCase().includes("gesendet");
     const recipients=formatRecipients(mail.recipients);
@@ -1656,6 +1668,7 @@ async function retestActiveLlmHealth(){
 function initLlmSettings(cfg){
   settingsConfig=cfg;
   applyThemeMode(cfg.app?.theme_mode||themeMode);
+  applyThreadOrder(cfg.app?.thread_order||"newest_first");
   llmDrafts=(cfg.llms&&cfg.llms.length?cfg.llms:[cfg.lm_studio||{}]).map((l,i)=>({
     id:l.id||("llm_"+(i+1)),
     name:l.name||l.model||"LLM",
@@ -1672,6 +1685,9 @@ function initLlmSettings(cfg){
 
 document.getElementById("cfg-theme-mode")?.addEventListener("change",function(){
   applyThemeMode(this.value);
+});
+document.getElementById("cfg-thread-order")?.addEventListener("change",function(){
+  applyThreadOrder(this.value);
 });
 
 async function loadActiveLlmPicker(){
@@ -2214,7 +2230,11 @@ async function saveSettings(){
   const payload={
     llms:llmDrafts,
     default_llm_id:defaultId,
-    app:{active_llm_id:activeLlmSelect.value||defaultId,theme_mode:normalizedThemeMode(document.getElementById("cfg-theme-mode")?.value||themeMode)},
+    app:{
+      active_llm_id:activeLlmSelect.value||defaultId,
+      theme_mode:normalizedThemeMode(document.getElementById("cfg-theme-mode")?.value||themeMode),
+      thread_order:normalizedThreadOrder(document.getElementById("cfg-thread-order")?.value||threadOrder),
+    },
     prompts:collectPromptSettings(),
     quick_templates:collectQuickTemplates(),
   };
