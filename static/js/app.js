@@ -903,6 +903,7 @@ function sanitizeEmailHtml(raw){
       "max-width","min-width","padding","padding-left","padding-right",
       "padding-top","padding-bottom","text-align","text-decoration",
       "vertical-align","white-space","width",
+      "color","background-color",
     ]);
     const safe=[];
     String(value||"").split(";").forEach(part=>{

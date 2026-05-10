@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from app import runtime as rt
-from app.task_runner import run_background, task_status
+from app.task_runner import run_background
 from modules import database
 
 
@@ -10,9 +10,8 @@ bp = Blueprint("knowledge", __name__, url_prefix="/api")
 
 @bp.route("/build_knowledge", methods=["POST"])
 def build_knowledge():
-    if task_status["running"]:
+    if not run_background(rt.kb.build):
         return jsonify({"error": "A task is already running"}), 409
-    run_background(rt.kb.build)
     return jsonify({"status": "started"})
 
 
@@ -26,15 +25,14 @@ def knowledge_stats():
 
 @bp.route("/email/<path:email_id>/build_contact_knowledge", methods=["POST"])
 def build_contact_knowledge(email_id):
-    if task_status["running"]:
-        return jsonify({"error": "A task is already running"}), 409
     email_row = database.get_email_by_id(email_id)
     if not email_row:
         return jsonify({"error": "Email not found"}), 404
     contact = rt.kb.contact_for_email(email_row)
     if not contact:
         return jsonify({"error": "Could not infer a contact for this email"}), 400
-    run_background(rt.kb.build_contact_for_email, email_id)
+    if not run_background(rt.kb.build_contact_for_email, email_id):
+        return jsonify({"error": "A task is already running"}), 409
     return jsonify({"status": "started", "contact": contact})
 
 

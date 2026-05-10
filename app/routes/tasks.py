@@ -9,9 +9,6 @@ bp = Blueprint("tasks", __name__, url_prefix="/api")
 
 @bp.route("/sync", methods=["POST"])
 def sync():
-    if task_status["running"]:
-        return jsonify({"error": "A task is already running"}), 409
-
     body = request.get_json(silent=True) or {}
     account_id = body.get("account_id")
     full_resync = bool(body.get("full_resync"))
@@ -20,10 +17,12 @@ def sync():
         fetcher = rt.fetchers.get(account_id)
         if not fetcher:
             return jsonify({"error": "Account not found"}), 404
-        run_background(fetcher.sync, full_resync)
+        started = run_background(fetcher.sync, full_resync)
     else:
-        run_background(rt.sync_all, full_resync)
+        started = run_background(rt.sync_all, full_resync)
 
+    if not started:
+        return jsonify({"error": "A task is already running"}), 409
     return jsonify({"status": "started"})
 
 

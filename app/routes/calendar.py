@@ -54,11 +54,10 @@ def calendar_events():
 
 @bp.route("/calendar/sync", methods=["POST"])
 def sync_calendar():
-    if task_runner.task_status.get("running"):
-        return jsonify({"error": "Task already running"}), 409
     body = request.json or {}
     account_id = body.get("account_id")
-    task_runner.run_background(calendar_store.sync_enabled_calendars, rt.config, account_id)
+    if not task_runner.run_background(calendar_store.sync_enabled_calendars, rt.config, account_id):
+        return jsonify({"error": "Task already running"}), 409
     return jsonify({"started": True})
 
 
