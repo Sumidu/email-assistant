@@ -2,7 +2,7 @@
 "use strict";
 
 // ─── State ────────────────────────────────────────────────────────────────
-let currentEmail=null,currentResponse="",currentFolder=null,currentAccountId=null;
+let currentEmail=null,currentThreadEmails=[],currentResponse="",currentFolder=null,currentAccountId=null;
 let emailOffset=0;const PAGE_SIZE=60;
 let allEmailsLocal=[];
 let taskPollInterval=null,searchTimer=null,accountsCache=[];
@@ -422,7 +422,10 @@ function renderEmailList(emails,append=false){
     const readFlag=(e.is_read===0||e.is_read===false)?'<span class="ei-unread-dot" title="Unread"></span>':"";
     const flagged=(e.is_flagged===1||e.is_flagged===true)?'<span class="ei-flagged" title="Flagged">&#9873;</span>':"";
     const importance=e.email_importance?`<span class="ei-importance" title="${e.email_importance} star importance">${"★".repeat(Number(e.email_importance))}</span>`:"";
-    div.innerHTML=`<div class="ei-main"><div class="ei-from">${readFlag}${flagged}<span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span>${importance}</div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
+    const threadCounts=Number(e.thread_count||0)>1
+      ?`<span class="ei-thread-count" title="${e.received_count||0} received, ${e.sent_count||0} sent">${e.received_count||0}↓ ${e.sent_count||0}↑</span>`
+      :"";
+    div.innerHTML=`<div class="ei-main"><div class="ei-from">${readFlag}${flagged}<span>${escHtml(extractName(e.sender||""))}</span>${badge}</div><div class="ei-subj">${escHtml(e.subject||"(no subject)")}</div><div class="ei-meta"><span>${escHtml(formatDate(e.date))}</span><span class="ei-meta-right">${threadCounts}${importance}</span></div></div><div class="ei-actions">${spamAction}${finishAction}</div>`;
     div.addEventListener("click",()=>openEmail(e.id,div));
     div.querySelector("[data-kb-file]")?.addEventListener("click",ev=>{ev.stopPropagation();openKnowledge(ev.currentTarget.dataset.kbFile);});
     div.querySelector("[data-finish-id]")?.addEventListener("click",ev=>{ev.stopPropagation();markEmailDone(e.id,{fromList:true});});
@@ -509,6 +512,64 @@ const markSpamBtn=document.getElementById("btn-mark-spam");
 const generateContactKbBtn=document.getElementById("btn-generate-contact-kb");
 const emailFindTodosBtn=document.getElementById("btn-email-find-todos");
 
+function splitVisibleQuoteText(text){
+  const markers=[
+    /^On .+ wrote:$/im,
+    /^Am .+ schrieb .+:$/im,
+    /^Von:\s.+$/im,
+    /^From:\s.+$/im,
+    /^-{2,}\s*Original Message\s*-{2,}$/im,
+    /^_{5,}$/m,
+  ];
+  let cut=-1;
+  for(const marker of markers){
+    const m=marker.exec(text||"");
+    if(m&&m.index>80&&(cut<0||m.index<cut))cut=m.index;
+  }
+  if(cut<0)return {visible:text||"",quoted:""};
+  return {visible:(text||"").slice(0,cut).trim(),quoted:(text||"").slice(cut).trim()};
+}
+
+function renderPlainThreadBody(text){
+  const parts=splitVisibleQuoteText(text||"");
+  const visible=escHtml(parts.visible||"[No body]");
+  const quoted=parts.quoted?`<details class="thread-quote"><summary>Quoted history</summary><pre>${escHtml(parts.quoted)}</pre></details>`:"";
+  return `<pre>${visible}</pre>${quoted}`;
+}
+
+function renderThreadMessages(emails){
+  if(!emails.length){
+    emailBody.className="placeholder";
+    emailBody.textContent="No messages in this thread.";
+    return;
+  }
+  emailBody.className="thread-view";
+  emailBody.innerHTML=emails.map((mail,idx)=>{
+    const isCurrent=currentEmail&&mail.id===currentEmail.id;
+    const isSent=(mail.folder||"").toLowerCase().includes("sent")||(mail.folder||"").toLowerCase().includes("gesendet");
+    const recipients=formatRecipients(mail.recipients);
+    const status=(mail.is_read===0||mail.is_read===false)?"Unread":"Read";
+    const flagged=(mail.is_flagged===1||mail.is_flagged===true)?'<span class="thread-chip flagged">Flagged</span>':"";
+    const bodyHtml=(mail.body_html||"").trim();
+    const bodyText=(mail.body_text||"").trim();
+    const body=bodyHtml
+      ?`<div class="thread-html">${sanitizeEmailHtml(bodyHtml)}</div>`
+      :`<div class="thread-plain">${renderPlainThreadBody(bodyText)}</div>`;
+    return `<article class="thread-message${isCurrent?" current":""}">
+      <div class="thread-message-head">
+        <div class="thread-avatar">${escHtml(extractName(mail.sender||"?").slice(0,1).toUpperCase()||"?")}</div>
+        <div class="thread-meta">
+          <div><strong>${escHtml(extractName(mail.sender||""))}</strong> <span>&lt;${escHtml(extractEmail(mail.sender||""))}&gt;</span></div>
+          <small>${escHtml(formatDate(mail.date))} · ${escHtml(mail.folder||"")} · ${status}${recipients?` · To: ${recipients}`:""}</small>
+        </div>
+        <div class="thread-badges">${isSent?'<span class="thread-chip sent">Sent</span>':'<span class="thread-chip received">Received</span>'}${flagged}${isCurrent?'<span class="thread-chip current">Reply target</span>':""}</div>
+      </div>
+      <div class="thread-message-body">${body}</div>
+    </article>`;
+  }).join("");
+  emailBody.querySelectorAll(".thread-html").forEach(prepareExternalEmailLinks);
+}
+
 async function openEmail(id,el){
   document.querySelectorAll(".email-item").forEach(x=>x.classList.remove("selected"));
   if(el)el.classList.add("selected");
@@ -524,6 +585,14 @@ async function openEmail(id,el){
     const data=await fetch(`/api/email/${encodeURIComponent(id)}`).then(r=>r.json());
     if(data.error){emailBody.textContent="Error: "+data.error;return;}
     currentEmail=data;
+    currentThreadEmails=[data];
+    if(data.thread_id){
+      try{
+        const qs=new URLSearchParams({account_id:data.account_id||currentAccountId||"",email_id:data.id});
+        const thread=await fetch(`/api/thread/${encodeURIComponent(data.thread_id)}?${qs.toString()}`).then(r=>r.json());
+        if(thread.emails?.length)currentThreadEmails=thread.emails;
+      }catch{}
+    }
     const isLocalFinished=data.folder==="Finished"||data.done_at;
     const isSpamFolder=/spam|junk/i.test(data.folder||"");
     markDoneBtn.style.display=isLocalFinished?"none":"";
@@ -536,21 +605,12 @@ async function openEmail(id,el){
     const flaggedLabel=(data.is_flagged===1||data.is_flagged===true)?"Flagged":"Not flagged";
     const importanceLabel=data.email_importance?`${data.email_importance}/5`:"Unrated";
     emailMeta.innerHTML=`<strong>From:</strong> ${escHtml(extractName(data.sender||""))} &lt;${escHtml(extractEmail(data.sender||""))}&gt;&nbsp;&nbsp;<strong>Date:</strong> ${escHtml(data.date||"")}&nbsp;&nbsp;<strong>Status:</strong> ${readLabel} / ${flaggedLabel}&nbsp;&nbsp;<strong>Importance:</strong> ${importanceLabel}<br><strong>To:</strong> ${formatRecipients(data.recipients)}`;
-    const html=(data.body_html||"").trim();
-    const text=(data.body_text||"").trim();
-    if(html){
-      emailBody.className="html-view";
-      const shadow=emailBody.attachShadow?null:null; // no shadow DOM, just iframe-less render
-      emailBody.innerHTML=sanitizeEmailHtml(html);
-      prepareExternalEmailLinks(emailBody);
-    }else{
-      emailBody.className="plain";emailBody.textContent=text||"[No body]";
-    }
+    renderThreadMessages(currentThreadEmails);
   }catch(err){emailBody.textContent="Error: "+err.message;setStatus("Error fetching email","err");}
 }
 
 function clearCurrentEmailView(){
-  currentEmail=null;currentResponse="";
+  currentEmail=null;currentThreadEmails=[];currentResponse="";
   markDoneBtn.style.display="none";
   markSpamBtn.style.display="none";
   emailFindTodosBtn.style.display="none";
@@ -975,7 +1035,7 @@ async function sendChat(userText){
   chatMessagesEl.appendChild(pending);chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
   try{
     const data=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email:currentEmail,messages:chatHistory,kb_files:[...activeCtxFiles]})}).then(r=>r.json());
+      body:JSON.stringify({email:currentEmail,thread_emails:currentThreadEmails,messages:chatHistory,kb_files:[...activeCtxFiles]})}).then(r=>r.json());
     chatMessagesEl.removeChild(pending);
     // Update draft panel if draft was provided
     if(data.draft){

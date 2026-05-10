@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 import email.utils
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -45,6 +46,8 @@ def init_db():
             body_html   TEXT,
             message_id  TEXT,
             in_reply_to TEXT,
+            references_header TEXT,
+            thread_id   TEXT,
             fetched_at  TEXT,
             kb_processed_at TEXT,
             done_at     TEXT,
@@ -98,6 +101,8 @@ def init_db():
     ensure_email_column("original_folder", "original_folder TEXT")
     ensure_email_column("imap_uid", "imap_uid INTEGER")
     ensure_email_column("uidvalidity", "uidvalidity TEXT")
+    ensure_email_column("references_header", "references_header TEXT")
+    ensure_email_column("thread_id", "thread_id TEXT")
     ensure_email_column("is_read", "is_read INTEGER DEFAULT 1")
     ensure_email_column("is_flagged", "is_flagged INTEGER DEFAULT 0")
     ensure_email_column("flags_synced_at", "flags_synced_at TEXT")
@@ -111,6 +116,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
         CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
         CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
+        CREATE INDEX IF NOT EXISTS idx_emails_thread ON emails(account_id, thread_id);
+        CREATE INDEX IF NOT EXISTS idx_emails_acct_fld_thread ON emails(account_id, folder, thread_id);
         CREATE INDEX IF NOT EXISTS idx_emails_importance ON emails(email_importance);
         CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
         CREATE INDEX IF NOT EXISTS idx_processed_actions_created ON processed_actions(created_at);
@@ -138,6 +145,8 @@ def init_db():
         )
         conn.commit()
 
+    _backfill_thread_ids(conn)
+
     conn.commit()
     conn.close()
 
@@ -161,6 +170,95 @@ def _local_date_start_ts(value: str) -> Optional[float]:
         return None
 
 
+def _message_id_tokens(value: str) -> list[str]:
+    if not value:
+        return []
+    tokens = re.findall(r"<[^>]+>", value)
+    if not tokens and value.strip():
+        tokens = [value.strip()]
+    cleaned = []
+    for token in tokens:
+        token = token.strip().strip("<>").strip().lower()
+        if token and token not in cleaned:
+            cleaned.append(token)
+    return cleaned
+
+
+def _thread_seed(message_id: str = "", in_reply_to: str = "", references_header: str = "") -> str:
+    refs = _message_id_tokens(references_header)
+    if refs:
+        return refs[0]
+    replies = _message_id_tokens(in_reply_to)
+    if replies:
+        return replies[0]
+    own = _message_id_tokens(message_id)
+    return own[0] if own else (message_id or "").strip().lower()
+
+
+def _thread_id_for(account_id: str, seed: str) -> str:
+    return f"{account_id}::{seed}" if seed else f"{account_id}::unknown"
+
+
+def _backfill_thread_ids(conn) -> None:
+    rows = conn.execute(
+        """SELECT id, account_id, message_id, in_reply_to, references_header
+           FROM emails
+           WHERE thread_id IS NULL OR thread_id = ''"""
+    ).fetchall()
+    if not rows:
+        return
+    by_account = {}
+    for row in rows:
+        by_account.setdefault(row["account_id"] or "default", []).append(row)
+    updates = []
+    for account_id, acct_rows in by_account.items():
+        own_keys = {}
+        for row in acct_rows:
+            for key in _message_id_tokens(row["message_id"]):
+                own_keys[key] = row
+
+        resolving = set()
+        resolved = {}
+
+        def root_for(row):
+            if row["id"] in resolved:
+                return resolved[row["id"]]
+            if row["id"] in resolving:
+                return _thread_seed(row["message_id"], row["in_reply_to"], row["references_header"])
+            resolving.add(row["id"])
+            refs = _message_id_tokens(row["references_header"])
+            if refs:
+                root = refs[0]
+            else:
+                replies = _message_id_tokens(row["in_reply_to"])
+                parent = own_keys.get(replies[0]) if replies else None
+                root = root_for(parent) if parent else _thread_seed(row["message_id"], row["in_reply_to"], row["references_header"])
+            resolving.discard(row["id"])
+            resolved[row["id"]] = root
+            return root
+
+        for row in acct_rows:
+            updates.append((_thread_id_for(account_id, root_for(row)), row["id"]))
+    if updates:
+        conn.executemany("UPDATE emails SET thread_id = ? WHERE id = ?", updates)
+
+
+def _parent_thread_id(conn, account_id: str, in_reply_to: str) -> str:
+    for token in _message_id_tokens(in_reply_to):
+        row = conn.execute(
+            """SELECT thread_id FROM emails
+               WHERE account_id = ?
+                 AND lower(trim(replace(replace(message_id, '<', ''), '>', ''))) = ?
+                 AND thread_id IS NOT NULL
+                 AND thread_id != ''
+               LIMIT 1""",
+            (account_id, token),
+        ).fetchone()
+        if row and row["thread_id"]:
+            return row["thread_id"]
+    return ""
+
+
 def save_email(data):
     conn = get_connection()
     existing = conn.execute(
@@ -175,14 +273,28 @@ def save_email(data):
     folder = FINISHED_FOLDER if done_at else data.get("folder", "")
     if done_at and not original_folder:
         original_folder = data.get("folder", "")
+    account_id = data.get("account_id", "default")
+    references_header = data.get("references_header", "")
+    thread_id = data.get("thread_id") or ""
+    if not thread_id and not references_header:
+        thread_id = _parent_thread_id(conn, account_id, data.get("in_reply_to", ""))
+    if not thread_id:
+        thread_id = _thread_id_for(
+            account_id,
+            _thread_seed(
+                data.get("message_id", ""),
+                data.get("in_reply_to", ""),
+                references_header,
+            ),
+        )
 
     conn.execute(
         """INSERT OR REPLACE INTO emails
            (id, folder, subject, sender, recipients, date, date_ts,
-            body_text, body_html, message_id, in_reply_to, fetched_at, account_id,
+            body_text, body_html, message_id, in_reply_to, references_header, thread_id, fetched_at, account_id,
             done_at, original_folder, imap_uid, uidvalidity, is_read, is_flagged, flags_synced_at,
             email_importance, email_importance_note, email_importance_updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             data["id"],
             folder,
@@ -195,8 +307,10 @@ def save_email(data):
             data.get("body_html", "")[:24000],
             data.get("message_id", ""),
             data.get("in_reply_to", ""),
+            references_header,
+            thread_id,
             datetime.now().isoformat(),
-            data.get("account_id", "default"),
+            account_id,
             done_at,
             original_folder,
             data.get("imap_uid"),
@@ -267,6 +381,69 @@ def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", i
               ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
               LIMIT ? OFFSET ?"""
     rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_email_threads(folder="INBOX", limit=60, offset=0, account_id=None, search="", importance=None, status=None, sent_folders=None):
+    conn = get_connection()
+    search = (search or "").strip()
+    where = ["folder = ?"]
+    params = [folder]
+    if account_id:
+        where.append("account_id = ?")
+        params.append(account_id)
+    if search:
+        like = f"%{search}%"
+        where.append(
+            """(
+                subject LIKE ? COLLATE NOCASE OR
+                sender LIKE ? COLLATE NOCASE OR
+                recipients LIKE ? COLLATE NOCASE OR
+                body_text LIKE ? COLLATE NOCASE
+            )"""
+        )
+        params.extend([like, like, like, like])
+    _apply_importance_filter(where, params, importance)
+    _apply_status_filter(where, status)
+    sent_folders = set(sent_folders or [])
+    sent_case = " OR ".join(["allm.folder = ?" for _ in sent_folders])
+    sent_expr = f"SUM(CASE WHEN {sent_case} THEN 1 ELSE 0 END)" if sent_case else "0"
+    sql = f"""
+        WITH matched AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(thread_id, id)
+                ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) DESC
+            ) AS rn
+            FROM emails
+            WHERE {' AND '.join(where)}
+        ),
+        agg AS (
+            SELECT COALESCE(allm.thread_id, allm.id) AS thread_key,
+                   COUNT(*) AS thread_count,
+                   {sent_expr} AS sent_count,
+                   SUM(CASE WHEN NOT ({sent_case or '0'}) THEN 1 ELSE 0 END) AS received_count,
+                   MAX(CASE WHEN allm.is_read = 0 THEN 1 ELSE 0 END) AS thread_unread,
+                   MAX(CASE WHEN allm.is_flagged = 1 THEN 1 ELSE 0 END) AS thread_flagged,
+                   MAX(COALESCE(allm.date_ts, strftime('%s', allm.fetched_at), 0)) AS thread_latest_ts
+            FROM emails allm
+            WHERE allm.account_id = COALESCE(?, allm.account_id)
+              AND COALESCE(allm.thread_id, allm.id) IN (SELECT COALESCE(thread_id, id) FROM matched)
+            GROUP BY COALESCE(allm.thread_id, allm.id)
+        )
+        SELECT matched.id, matched.folder, matched.subject, matched.sender, matched.recipients,
+               matched.date, matched.message_id, matched.account_id, matched.is_read,
+               matched.is_flagged, matched.email_importance, COALESCE(matched.thread_id, matched.id) AS thread_id,
+               agg.thread_count, agg.sent_count, agg.received_count,
+               agg.thread_unread, agg.thread_flagged
+        FROM matched
+        JOIN agg ON agg.thread_key = COALESCE(matched.thread_id, matched.id)
+        WHERE matched.rn = 1
+        ORDER BY agg.thread_latest_ts DESC
+        LIMIT ? OFFSET ?
+    """
+    sql_params = [*params, *sent_folders, *sent_folders, account_id, int(limit), int(offset)]
+    rows = conn.execute(sql, sql_params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -393,6 +570,20 @@ def get_email_by_id(email_id):
     row = conn.execute("SELECT * FROM emails WHERE id = ?", (email_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def get_thread_emails(account_id: str, thread_id: str) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT *
+           FROM emails
+           WHERE account_id = ?
+             AND COALESCE(thread_id, id) = ?
+           ORDER BY COALESCE(date_ts, strftime('%s', fetched_at), 0) ASC""",
+        (account_id, thread_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def search_emails_for_todos(

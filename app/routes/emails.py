@@ -7,6 +7,20 @@ from modules import database
 bp = Blueprint("emails", __name__, url_prefix="/api")
 
 
+def _sent_folders_for(account_id=None):
+    folders = set()
+    for account in rt.config.get("accounts", []):
+        if account_id and account.get("id") != account_id:
+            continue
+        imap = account.get("imap", {})
+        if imap.get("sent_folder"):
+            folders.add(imap["sent_folder"])
+        for folder in imap.get("sync_folders", []):
+            if folder.get("role") == "sent" and folder.get("name"):
+                folders.add(folder["name"])
+    return sorted(folders)
+
+
 @bp.route("/emails")
 def emails():
     limit = int(request.args.get("limit", 60))
@@ -16,7 +30,7 @@ def emails():
     search = request.args.get("q") or ""
     importance = request.args.get("importance") or ""
     status = request.args.get("status") or ""
-    rows = database.get_emails(
+    rows = database.get_email_threads(
         folder=folder,
         limit=limit,
         offset=offset,
@@ -24,6 +38,7 @@ def emails():
         search=search,
         importance=importance,
         status=status,
+        sent_folders=_sent_folders_for(account_id),
     )
     if rt.kb:
         for row in rows:
@@ -37,6 +52,21 @@ def email_detail(email_id):
     if not data:
         return jsonify({"error": "Not found"}), 404
     return jsonify(data)
+
+
+@bp.route("/thread/<path:thread_id>")
+def thread_detail(thread_id):
+    account_id = request.args.get("account_id") or None
+    if not account_id:
+        email_id = request.args.get("email_id") or ""
+        row = database.get_email_by_id(email_id) if email_id else None
+        account_id = row.get("account_id") if row else None
+    if not account_id:
+        return jsonify({"error": "Missing account_id"}), 400
+    rows = database.get_thread_emails(account_id, thread_id)
+    if not rows:
+        return jsonify({"error": "Thread not found"}), 404
+    return jsonify({"thread_id": thread_id, "account_id": account_id, "emails": rows})
 
 
 @bp.route("/email/<path:email_id>/done", methods=["POST"])

@@ -133,7 +133,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .ei-kb-badge{flex-shrink:0;border:1px solid color-mix(in srgb,var(--amber) 65%,var(--border2));color:var(--amber);background:color-mix(in srgb,var(--amber) 11%,transparent);border-radius:999px;padding:1px 6px;font-size:9px;font-weight:700;letter-spacing:.4px;cursor:pointer;font-family:var(--font);}
 .ei-kb-badge:hover{background:color-mix(in srgb,var(--amber) 18%,transparent);border-color:var(--amber);}
 .email-item .ei-subj{color:var(--text);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;}
-.email-item .ei-meta{color:var(--muted);font-size:9.5px;display:flex;justify-content:space-between;}
+.email-item .ei-meta{color:var(--muted);font-size:9.5px;display:flex;justify-content:space-between;gap:8px;}
+.ei-meta-right{display:inline-flex;gap:6px;align-items:center;min-width:0;}
+.ei-thread-count{border:1px solid var(--border2);border-radius:999px;background:var(--bg2);color:var(--muted);font-size:8.5px;padding:0 5px;white-space:nowrap;}
 .ei-importance{color:var(--amber);font-size:9px;letter-spacing:.5px;white-space:nowrap;margin-left:8px;}
 .ei-actions{display:flex;gap:4px;align-items:center;flex-shrink:0;}
 .ei-finish-btn,.ei-spam-btn{width:26px;height:26px;border:1px solid var(--border2);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;flex-shrink:0;opacity:0;transition:opacity .12s,border-color .12s,color .12s,background .12s;}
@@ -168,6 +170,26 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 #email-body.html-view .blocked-email-image,.rendered .blocked-email-image{display:inline-flex;align-items:center;max-width:100%;border:1px solid var(--border2);border-radius:7px;background:var(--bg2);color:var(--muted)!important;font-size:11px;padding:3px 7px;margin:2px 0;font-style:italic;}
 #email-body.html-view p,#email-body.html-view div{margin-bottom:4px;}
 #email-body.placeholder{color:var(--muted);font-style:italic;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:1px;white-space:normal;}
+#email-body.thread-view{padding:0;background:var(--bg0);overflow-y:auto;}
+.thread-message{background:var(--bg1);border-bottom:1px solid var(--border);padding:12px 18px;}
+.thread-message.current{border-left:3px solid var(--amber);background:color-mix(in srgb,var(--amber) 4%,var(--bg1));padding-left:15px;}
+.thread-message-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;}
+.thread-avatar{width:28px;height:28px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;color:var(--bright);font-weight:800;font-size:11px;flex-shrink:0;}
+.thread-meta{flex:1;min-width:0;}
+.thread-meta strong{color:var(--bright);font-size:12px;}
+.thread-meta span,.thread-meta small{color:var(--muted);font-size:10px;}
+.thread-meta small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px;}
+.thread-badges{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:190px;}
+.thread-chip{border:1px solid var(--border2);border-radius:999px;background:var(--bg2);color:var(--muted);font-size:8.5px;padding:1px 6px;white-space:nowrap;}
+.thread-chip.sent{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 60%,var(--border2));}
+.thread-chip.received{color:var(--green);border-color:color-mix(in srgb,var(--green) 55%,var(--border2));}
+.thread-chip.flagged,.thread-chip.current{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 65%,var(--border2));}
+.thread-message-body{color:var(--text);font-size:12px;line-height:1.6;}
+.thread-html{overflow-wrap:anywhere;}
+.thread-plain pre{white-space:pre-wrap;font-family:var(--font);font-size:12px;line-height:1.6;color:var(--text);}
+.thread-quote{margin-top:8px;border-top:1px solid var(--border);padding-top:6px;color:var(--muted);}
+.thread-quote summary{cursor:pointer;font-size:10px;color:var(--muted);}
+.thread-quote pre{margin-top:6px;color:var(--muted);font-size:10.5px;line-height:1.45;}
 
 /* ─── Response panel (draft + chat columns) ──────────────────────────────── */
 #response-panel{display:flex;flex-direction:row;overflow:hidden;flex:1;min-height:120px;}

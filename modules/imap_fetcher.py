@@ -316,6 +316,7 @@ class IMAPFetcher:
                     "body_html":  body_html,
                     "message_id": raw_id,
                     "in_reply_to": (msg.get("In-Reply-To") or "").strip(),
+                    "references_header": (msg.get("References") or "").strip(),
                     "imap_uid":   uid_int,
                     "uidvalidity": uidvalidity,
                     "is_read":    is_read,

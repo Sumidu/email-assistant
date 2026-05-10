@@ -17,6 +17,7 @@ def chat():
         email_data=data["email"],
         messages=data.get("messages", []),
         kb_files=data.get("kb_files", []),
+        thread_emails=data.get("thread_emails", []),
     )
     return jsonify(result)
 

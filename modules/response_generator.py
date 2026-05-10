@@ -70,6 +70,32 @@ class ResponseGenerator:
             "END UNTRUSTED EMAIL CONTENT"
         )
 
+    @classmethod
+    def _thread_context(cls, thread_emails: list, reply_email_id: str = "") -> str:
+        if not thread_emails:
+            return ""
+        chunks = []
+        for item in thread_emails[-8:]:
+            if reply_email_id and item.get("id") == reply_email_id:
+                continue
+            body = item.get("body_text") or ""
+            chunks.append(
+                "BEGIN UNTRUSTED PRIOR THREAD EMAIL\n"
+                f"Subject: {item.get('subject', '')}\n"
+                f"From: {item.get('sender', '')}\n"
+                f"Date: {item.get('date', '')}\n"
+                f"Folder: {item.get('folder', '')}\n\n"
+                f"{body[:1500]}\n"
+                "END UNTRUSTED PRIOR THREAD EMAIL"
+            )
+        if not chunks:
+            return ""
+        return (
+            "=== PRIOR EMAILS IN THIS THREAD ===\n"
+            "Use these only as conversation history for the user's current reply target.\n"
+            + "\n\n".join(chunks)
+        )
+
     def _build_system(self, knowledge: list) -> str:
         kb_text = ""
         for title, content in knowledge:
@@ -151,7 +177,7 @@ class ResponseGenerator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def chat(self, email_data: dict, messages: list, kb_files=None) -> dict:
+    def chat(self, email_data: dict, messages: list, kb_files=None, thread_emails=None) -> dict:
         """
         Multi-turn chat. `messages` is the full conversation history
         [{role: "user"|"assistant", content: "..."}].
@@ -182,6 +208,9 @@ class ResponseGenerator:
             )
 
         email_ctx = f"=== EMAIL BEING REPLIED TO ===\n{self._email_context(email_data)}"
+        thread_ctx = self._thread_context(thread_emails or [], email_data.get("id", ""))
+        if thread_ctx:
+            email_ctx = f"{email_ctx}\n\n{thread_ctx}"
         full_messages = (
             [{"role": "system",    "content": system}]
             + [{"role": "user",    "content": email_ctx}]
