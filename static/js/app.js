@@ -1030,6 +1030,10 @@ function renderMarkdownText(markdown){
     }
   }
   if(!prepared)prepared=source.replace(fenceRe,(match,inner)=>inner.trim()+"\n");
+  prepared=prepared.replace(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g,(_,stem,label)=>{
+    const display=(label||stem).trim();
+    return `[${display}](#kb:${encodeURIComponent(stem.trim())})`;
+  });
   return typeof marked!=="undefined"?sanitizeEmailHtml(marked.parse(prepared)):escHtml(prepared);
 }
 
@@ -1255,6 +1259,19 @@ let kbCategoryFilter="people";
 
 const kbViewMode=document.getElementById("kb-view-mode");
 const kbEditMode=document.getElementById("kb-edit-mode");
+kbViewMode.addEventListener("click",async e=>{
+  const link=e.target.closest("a[href]");
+  if(!link)return;
+  const hash=new URL(link.href,window.location.href).hash;
+  if(!hash.startsWith("#kb:"))return;
+  e.preventDefault();
+  const stem=decodeURIComponent(hash.slice(4)).trim();
+  const target=stem.endsWith(".md")?stem:stem+".md";
+  const idx=kbFiles.findIndex(f=>f.name.toLowerCase()===target.toLowerCase());
+  if(idx<0){setStatus("Knowledge file not found: "+stem,"err");return;}
+  setKbSearch("");
+  renderKbList(target);
+});
 const kbEditFilename=document.getElementById("kb-edit-filename");
 const kbEditAliases=document.getElementById("kb-edit-aliases");
 const kbEditPatterns=document.getElementById("kb-edit-patterns");
