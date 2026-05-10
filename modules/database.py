@@ -898,6 +898,43 @@ def get_processed_today_count() -> dict:
     return {"processed_today": finished + spam, "finished_today": finished, "spam_today": spam}
 
 
+def get_completion_history(days: int = 30) -> list:
+    """Return daily finished+spam counts for the last `days` days (including today)."""
+    conn = get_connection()
+    finished_rows = conn.execute(
+        """SELECT date(done_at, 'localtime') as day, COUNT(*) as cnt
+           FROM emails
+           WHERE done_at >= datetime('now', 'localtime', ? || ' days')
+           GROUP BY day""",
+        (f"-{days}",),
+    ).fetchall()
+    spam_rows = conn.execute(
+        """SELECT date(created_at, 'localtime') as day, COUNT(*) as cnt
+           FROM processed_actions
+           WHERE action = 'spam'
+             AND created_at >= datetime('now', ? || ' days')
+           GROUP BY day""",
+        (f"-{days}",),
+    ).fetchall()
+    conn.close()
+
+    finished_by_day = {r[0]: r[1] for r in finished_rows}
+    spam_by_day = {r[0]: r[1] for r in spam_rows}
+
+    from datetime import date, timedelta
+    today = date.today()
+    result = []
+    for i in range(days - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        result.append({
+            "date": d,
+            "finished": finished_by_day.get(d, 0),
+            "spam": spam_by_day.get(d, 0),
+            "total": finished_by_day.get(d, 0) + spam_by_day.get(d, 0),
+        })
+    return result
+
+
 def get_email_count(account_id=None):
     conn = get_connection()
     if account_id:
