@@ -132,7 +132,10 @@ function switchTab(tabId){
   settingsActiveTab=tabId;
   document.querySelectorAll(".tab-btn").forEach(b=>b.classList.toggle("active",b.dataset.tab===tabId));
   document.querySelectorAll(".tab-pane").forEach(p=>p.classList.toggle("active",p.id===tabId));
-  if(tabId==="tab-logs")loadDebugLog();
+  if(tabId==="tab-logs"){
+    loadActivityLog();
+    loadDebugLog();
+  }
 }
 document.querySelectorAll(".tab-btn").forEach(btn=>btn.addEventListener("click",()=>{
   switchTab(btn.dataset.tab);
@@ -389,6 +392,7 @@ function startTaskPoll(label,expectedSteps,onDone){
     const lines=s.progress||[];
     const pct=totalExpected>0?Math.min(99,Math.round(lines.length/totalExpected*100)):0;
     if(lines.length)showProgress(lines,pct);
+    if(settingsActiveTab==="tab-logs")loadActivityLog();
     if(s.message)setStatus(s.message,"busy");
     if(isKnowledgeTask(label)&&taskPollTicks%4===0)refreshKnowledgeIndicators();
     if(!s.running){
@@ -401,6 +405,7 @@ function startTaskPoll(label,expectedSteps,onDone){
       localStorage.setItem("progress-minimized",progressMinimized?"1":"0");
       updateProgressMinimizeButton();
       if(isKnowledgeTask(label))await refreshKnowledgeIndicators();
+      if(settingsActiveTab==="tab-logs")loadActivityLog();
       if(onDone)onDone(s.result);
     }
   },800);
@@ -789,16 +794,40 @@ async function refreshAfterEmailMove(emailId,nextId=null){
   }else if(currentEmail?.id===emailId)clearCurrentEmailView();
 }
 
+function optimisticRemoveEmailFromList(emailId,nextId=null){
+  allEmailsLocal=allEmailsLocal.filter(e=>e.id!==emailId);
+  const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(emailId)}"]`);
+  if(row)row.remove();
+  if(!emailListEl.querySelector(".email-item")){
+    emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">No messages.</div>';
+  }
+  if(nextId){
+    const nextRow=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(nextId)}"]`);
+    if(nextRow)openEmail(nextId,nextRow);
+    else if(currentEmail?.id===emailId)clearCurrentEmailView();
+  }else if(currentEmail?.id===emailId){
+    clearCurrentEmailView();
+  }
+}
+
 async function markEmailDone(emailId=currentEmail?.id,{fromList=false}={}){
   if(!emailId)return;
   const nextId=adjacentEmailId(emailId);
+  optimisticRemoveEmailFromList(emailId,nextId);
+  setStatus("Moved to local Finished folder","ok");
   try{
     const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"POST"}).then(r=>r.json());
-    if(!res.success){setStatus("Done failed: "+(res.error||"?"),"err");return;}
-    setStatus("Moved to local Finished folder","ok");
+    if(!res.success){
+      setStatus("Done failed: "+(res.error||"?"),"err");
+      if(currentFolder)await loadEmailList(false,{preserveSelection:true});
+      return;
+    }
     refreshFinishedToday();
-    await refreshAfterEmailMove(emailId,nextId);
-  }catch(err){setStatus("Done failed: "+err.message,"err");}
+    loadFolders();
+  }catch(err){
+    setStatus("Done failed: "+err.message,"err");
+    if(currentFolder)await loadEmailList(false,{preserveSelection:true});
+  }
 }
 
 async function unarchiveEmail(emailId=currentEmail?.id,{fromList=false}={}){
@@ -3165,7 +3194,48 @@ document.getElementById("btn-calendar-sync").addEventListener("click",()=>{
     .catch(err=>setStatus("Calendar sync error: "+err.message,"err"));
 });
 
-// ─── Debug log modal ──────────────────────────────────────────────────────
+// ─── Settings logs ────────────────────────────────────────────────────────
+let activityLogBusy=false;
+
+function renderActivityLog(data){
+  const status=document.getElementById("activity-console-status");
+  const box=document.getElementById("activity-console");
+  if(!status||!box)return;
+  const entries=data.entries||[];
+  status.classList.toggle("running",!!data.running);
+  status.textContent=data.running?`Running: ${data.message||"Working…"}`:`Idle: ${data.message||"Idle"}`;
+  const shouldStick=box.scrollTop+box.clientHeight>=box.scrollHeight-24;
+  if(!entries.length){
+    box.innerHTML='<div class="activity-line"><span class="activity-time">--:--:--</span><span class="activity-source">system</span><span class="activity-msg">No activity yet.</span></div>';
+    return;
+  }
+  box.innerHTML=entries.map(entry=>{
+    const date=entry.ts?new Date(entry.ts):null;
+    const time=date&&!Number.isNaN(date.getTime())?date.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"--:--:--";
+    const level=entry.level==="error"?"error":entry.level==="ok"?"ok":"";
+    return `<div class="activity-line ${level}">
+      <span class="activity-time">${escHtml(time)}</span>
+      <span class="activity-source">${escHtml(entry.source||"task")}</span>
+      <span class="activity-msg">${escHtml(entry.message||"")}</span>
+    </div>`;
+  }).join("");
+  if(shouldStick)box.scrollTop=box.scrollHeight;
+}
+
+async function loadActivityLog(){
+  if(activityLogBusy)return;
+  activityLogBusy=true;
+  try{
+    const data=await fetch("/api/activity_log").then(r=>r.json());
+    renderActivityLog(data);
+  }catch(e){
+    const box=document.getElementById("activity-console");
+    if(box)box.textContent="Error loading activity log: "+e.message;
+  }finally{
+    activityLogBusy=false;
+  }
+}
+
 let debugEntries=[];
 let debugSummary=null;
 let debugReadIds=new Set(JSON.parse(localStorage.getItem("mail-log-read-ids")||"[]"));
@@ -3299,6 +3369,11 @@ async function loadDebugLog(){
   }catch(e){document.getElementById("debug-entry-detail").textContent="Error loading log: "+e.message;}
 }
 document.getElementById("btn-debug-refresh").addEventListener("click",loadDebugLog);
+document.getElementById("btn-activity-refresh").addEventListener("click",loadActivityLog);
+document.getElementById("btn-activity-clear").addEventListener("click",async()=>{
+  await fetch("/api/activity_log/clear",{method:"POST"});
+  await loadActivityLog();
+});
 document.getElementById("btn-debug-mark-read").addEventListener("click",()=>{
   debugEntries.forEach(entry=>{
     const meta=parseLogEntry(entry);

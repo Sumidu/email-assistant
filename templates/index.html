@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='maillist-resize-20260510') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='activity-console-20260511') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -473,6 +473,14 @@
           <div id="debug-entry-list"></div>
           <div id="debug-entry-detail">No log selected.</div>
         </div>
+        <div class="section-label settings-activity-label">Activity Console</div>
+        <div class="settings-log-actions">
+          <button class="sbtn" id="btn-activity-clear" type="button">Clear Console</button>
+          <button class="sbtn" id="btn-activity-refresh" type="button">Refresh Activity</button>
+        </div>
+        <div class="field-hint log-hint">Live background task output. Use this while syncing to see which account, folder, and step is currently active.</div>
+        <div id="activity-console-status">Idle</div>
+        <div id="activity-console"></div>
       </div>
 
     </div>
@@ -578,6 +586,6 @@
 
 <div id="copy-toast">Copied</div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='maillist-resize-20260510') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js', v='activity-console-20260511') }}"></script>
 </body>
 </html>

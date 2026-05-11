@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from app import runtime as rt
-from app.task_runner import run_background, task_status
+from app.task_runner import clear_activity_log, get_activity_log, get_task_status as task_status_snapshot, run_background
 
 
 bp = Blueprint("tasks", __name__, url_prefix="/api")
@@ -28,4 +28,15 @@ def sync():
 
 @bp.route("/task_status")
 def get_task_status():
-    return jsonify(task_status)
+    return jsonify(task_status_snapshot())
+
+
+@bp.route("/activity_log")
+def activity_log():
+    return jsonify(get_activity_log())
+
+
+@bp.route("/activity_log/clear", methods=["POST"])
+def clear_log():
+    clear_activity_log()
+    return jsonify({"success": True})

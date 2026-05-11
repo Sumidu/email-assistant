@@ -3,6 +3,7 @@ import json
 import os
 import email.utils
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -15,14 +16,39 @@ FINISHED_FOLDER = "Finished"
 
 def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA busy_timeout = 60000")
     return conn
+
+
+def _is_database_locked(exc: sqlite3.OperationalError) -> bool:
+    return "database is locked" in str(exc).lower() or "database table is locked" in str(exc).lower()
+
+
+def _with_write_retry(fn, attempts: int = 6, delay: float = 0.25):
+    last_exc = None
+    for attempt in range(attempts):
+        conn = get_connection()
+        try:
+            result = fn(conn)
+            conn.commit()
+            return result
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            last_exc = exc
+            if not _is_database_locked(exc) or attempt == attempts - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
+        finally:
+            conn.close()
+    raise last_exc
 
 
 def init_db():
     conn = get_connection()
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
 
     def email_columns():
         return [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
@@ -261,71 +287,72 @@ def _parent_thread_id(conn, account_id: str, in_reply_to: str) -> str:
 
 
 def save_email(data):
-    conn = get_connection()
-    existing = conn.execute(
-        "SELECT done_at, original_folder, email_importance, email_importance_note, email_importance_updated_at FROM emails WHERE id = ?",
-        (data["id"],),
-    ).fetchone()
-    done_at = existing["done_at"] if existing else None
-    original_folder = existing["original_folder"] if existing else None
-    email_importance = existing["email_importance"] if existing else None
-    email_importance_note = existing["email_importance_note"] if existing else None
-    email_importance_updated_at = existing["email_importance_updated_at"] if existing else None
-    folder = FINISHED_FOLDER if done_at else data.get("folder", "")
-    if done_at and not original_folder:
-        original_folder = data.get("folder", "")
-    account_id = data.get("account_id", "default")
-    references_header = data.get("references_header", "")
-    thread_id = data.get("thread_id") or ""
-    if not thread_id and not references_header:
-        thread_id = _parent_thread_id(conn, account_id, data.get("in_reply_to", ""))
-    if not thread_id:
-        thread_id = _thread_id_for(
-            account_id,
-            _thread_seed(
+    def work(conn):
+        existing = conn.execute(
+            "SELECT done_at, original_folder, email_importance, email_importance_note, email_importance_updated_at FROM emails WHERE id = ?",
+            (data["id"],),
+        ).fetchone()
+        done_at = existing["done_at"] if existing else None
+        original_folder = existing["original_folder"] if existing else None
+        email_importance = existing["email_importance"] if existing else None
+        email_importance_note = existing["email_importance_note"] if existing else None
+        email_importance_updated_at = existing["email_importance_updated_at"] if existing else None
+        folder = FINISHED_FOLDER if done_at else data.get("folder", "")
+        if done_at and not original_folder:
+            original_folder = data.get("folder", "")
+        account_id = data.get("account_id", "default")
+        references_header = data.get("references_header", "")
+        thread_id = data.get("thread_id") or ""
+        if not thread_id and not references_header:
+            thread_id = _parent_thread_id(conn, account_id, data.get("in_reply_to", ""))
+        if not thread_id:
+            thread_id = _thread_id_for(
+                account_id,
+                _thread_seed(
+                    data.get("message_id", ""),
+                    data.get("in_reply_to", ""),
+                    references_header,
+                ),
+            )
+
+        conn.execute(
+            """INSERT OR REPLACE INTO emails
+               (id, folder, subject, sender, recipients, date, date_ts,
+                body_text, body_html, message_id, in_reply_to, references_header, thread_id, fetched_at, account_id,
+                done_at, original_folder, imap_uid, uidvalidity, is_read, is_flagged, flags_synced_at,
+                email_importance, email_importance_note, email_importance_updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data["id"],
+                folder,
+                data.get("subject", ""),
+                data.get("sender", ""),
+                json.dumps(data.get("recipients", [])),
+                data.get("date", ""),
+                _parse_email_date_ts(data.get("date", "")),
+                data.get("body_text", "")[:12000],
+                data.get("body_html", "")[:24000],
                 data.get("message_id", ""),
                 data.get("in_reply_to", ""),
                 references_header,
+                thread_id,
+                datetime.now().isoformat(),
+                account_id,
+                done_at,
+                original_folder,
+                data.get("imap_uid"),
+                data.get("uidvalidity", ""),
+                1 if data.get("is_read", True) else 0,
+                1 if data.get("is_flagged", False) else 0,
+                datetime.now().isoformat(),
+                email_importance,
+                email_importance_note,
+                email_importance_updated_at,
             ),
         )
+        return None
 
-    conn.execute(
-        """INSERT OR REPLACE INTO emails
-           (id, folder, subject, sender, recipients, date, date_ts,
-            body_text, body_html, message_id, in_reply_to, references_header, thread_id, fetched_at, account_id,
-            done_at, original_folder, imap_uid, uidvalidity, is_read, is_flagged, flags_synced_at,
-            email_importance, email_importance_note, email_importance_updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            data["id"],
-            folder,
-            data.get("subject", ""),
-            data.get("sender", ""),
-            json.dumps(data.get("recipients", [])),
-            data.get("date", ""),
-            _parse_email_date_ts(data.get("date", "")),
-            data.get("body_text", "")[:12000],
-            data.get("body_html", "")[:24000],
-            data.get("message_id", ""),
-            data.get("in_reply_to", ""),
-            references_header,
-            thread_id,
-            datetime.now().isoformat(),
-            account_id,
-            done_at,
-            original_folder,
-            data.get("imap_uid"),
-            data.get("uidvalidity", ""),
-            1 if data.get("is_read", True) else 0,
-            1 if data.get("is_flagged", False) else 0,
-            datetime.now().isoformat(),
-            email_importance,
-            email_importance_note,
-            email_importance_updated_at,
-        ),
-    )
-    conn.commit()
-    conn.close()
+    _with_write_retry(work)
 
 
 def _apply_importance_filter(where: list[str], params: list, importance=None) -> None:
@@ -450,26 +477,26 @@ def get_email_threads(folder="INBOX", limit=60, offset=0, account_id=None, searc
 
 
 def update_email_flags_by_uid(account_id: str, folder: str, uidvalidity: str, imap_uid: int, is_read: bool, is_flagged: bool) -> None:
-    conn = get_connection()
-    conn.execute(
-        """UPDATE emails
-              SET is_read = ?,
-                  is_flagged = ?,
-                  flags_synced_at = ?
-           WHERE account_id = ?
-             AND uidvalidity = ?
-             AND imap_uid = ?
-             AND (folder = ? OR original_folder = ?)""",
-        (1 if is_read else 0, 1 if is_flagged else 0, datetime.now().isoformat(), account_id, uidvalidity, imap_uid, folder, folder),
-    )
-    conn.commit()
-    conn.close()
+    def work(conn):
+        conn.execute(
+            """UPDATE emails
+                  SET is_read = ?,
+                      is_flagged = ?,
+                      flags_synced_at = ?
+               WHERE account_id = ?
+                 AND uidvalidity = ?
+                 AND imap_uid = ?
+                 AND (folder = ? OR original_folder = ?)""",
+            (1 if is_read else 0, 1 if is_flagged else 0, datetime.now().isoformat(), account_id, uidvalidity, imap_uid, folder, folder),
+        )
+        return None
+
+    _with_write_retry(work)
 
 
 def update_email_flags_batch(account_id: str, folder: str, uidvalidity: str, uid_flags: dict[int, dict]) -> int:
     if not uidvalidity or not uid_flags:
         return 0
-    conn = get_connection()
     now = datetime.now().isoformat()
     rows = [
         (
@@ -484,20 +511,27 @@ def update_email_flags_batch(account_id: str, folder: str, uidvalidity: str, uid
         )
         for uid, flags in uid_flags.items()
     ]
-    cur = conn.executemany(
-        """UPDATE emails
-              SET is_read = ?,
-                  is_flagged = ?,
-                  flags_synced_at = ?
-           WHERE account_id = ?
-             AND uidvalidity = ?
-             AND imap_uid = ?
-             AND (folder = ? OR original_folder = ?)""",
-        rows,
-    )
-    conn.commit()
-    conn.close()
-    return int(cur.rowcount or 0)
+    total = 0
+    for idx in range(0, len(rows), 50):
+        batch = rows[idx:idx + 50]
+
+        def work(conn, batch=batch):
+            cur = conn.executemany(
+                """UPDATE emails
+                      SET is_read = ?,
+                          is_flagged = ?,
+                          flags_synced_at = ?
+                   WHERE account_id = ?
+                     AND uidvalidity = ?
+                     AND imap_uid = ?
+                     AND (folder = ? OR original_folder = ?)""",
+                batch,
+            )
+            return int(cur.rowcount or 0)
+
+        total += _with_write_retry(work)
+        time.sleep(0.01)
+    return total
 
 
 def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
@@ -704,15 +738,21 @@ def remove_missing_remote_emails(account_id: str, folder: str, uidvalidity: str,
              AND (folder = ? OR original_folder = ?)""",
         (account_id, uidvalidity, folder, folder),
     ).fetchall()
+    conn.close()
     stale_ids = [
         row["id"]
         for row in rows
         if row["imap_uid"] is not None and int(row["imap_uid"]) not in remote_uids
     ]
-    if stale_ids:
-        conn.executemany("DELETE FROM emails WHERE id = ?", [(eid,) for eid in stale_ids])
-        conn.commit()
-    conn.close()
+    for idx in range(0, len(stale_ids), 50):
+        batch = stale_ids[idx:idx + 50]
+
+        def work(conn, batch=batch):
+            conn.executemany("DELETE FROM emails WHERE id = ?", [(eid,) for eid in batch])
+            return None
+
+        _with_write_retry(work)
+        time.sleep(0.01)
     return len(stale_ids)
 
 
@@ -727,95 +767,99 @@ def get_sync_state(account_id: str, folder: str) -> dict | None:
 
 
 def save_sync_state(account_id: str, folder: str, uidvalidity: str, last_seen_uid: int) -> None:
-    conn = get_connection()
-    conn.execute(
-        """INSERT OR REPLACE INTO sync_state
-           (account_id, folder, uidvalidity, last_seen_uid, last_sync_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (account_id, folder, uidvalidity, int(last_seen_uid or 0), datetime.now().isoformat()),
-    )
-    conn.commit()
-    conn.close()
+    def work(conn):
+        conn.execute(
+            """INSERT OR REPLACE INTO sync_state
+               (account_id, folder, uidvalidity, last_seen_uid, last_sync_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (account_id, folder, uidvalidity, int(last_seen_uid or 0), datetime.now().isoformat()),
+        )
+        return None
+
+    _with_write_retry(work)
 
 
 def mark_email_done(email_id: str) -> dict:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id, folder, done_at FROM emails WHERE id = ?",
-        (email_id,),
-    ).fetchone()
-    if not row:
-        conn.close()
-        return {"success": False, "error": "Email not found"}
-    if row["done_at"]:
-        conn.close()
-        return {"success": True, "already_done": True}
-
     ts = datetime.now().isoformat()
-    original_folder = row["folder"]
-    conn.execute(
-        "UPDATE emails SET folder = ?, done_at = ?, original_folder = ? WHERE id = ?",
-        (FINISHED_FOLDER, ts, original_folder, email_id),
-    )
-    conn.commit()
-    conn.close()
-    triage_store.record_done(email_id, ts, original_folder)
+
+    def work(conn):
+        row = conn.execute(
+            "SELECT id, folder, done_at FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+        if not row:
+            return {"success": False, "error": "Email not found"}
+        if row["done_at"]:
+            return {"success": True, "already_done": True}
+        original_folder = row["folder"]
+        conn.execute(
+            "UPDATE emails SET folder = ?, done_at = ?, original_folder = ? WHERE id = ?",
+            (FINISHED_FOLDER, ts, original_folder, email_id),
+        )
+        return {"success": True, "folder": FINISHED_FOLDER, "done_at": ts, "original_folder": original_folder}
+
+    result = _with_write_retry(work)
+    if result.get("success") and not result.get("already_done"):
+        triage_store.record_done(email_id, ts, result.get("original_folder"))
+    if not result.get("success") or result.get("already_done"):
+        return result
     return {"success": True, "folder": FINISHED_FOLDER, "done_at": ts}
 
 
 def unmark_email_done(email_id: str) -> dict:
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT id, folder, done_at, original_folder FROM emails WHERE id = ?",
-        (email_id,),
-    ).fetchone()
-    if not row:
-        conn.close()
-        return {"success": False, "error": "Email not found"}
-    target_folder = row["original_folder"] or "INBOX"
-    conn.execute(
-        "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
-        (target_folder, email_id),
-    )
-    conn.commit()
-    conn.close()
-    triage_store.record_undone(email_id)
-    return {"success": True, "folder": target_folder}
+    def work(conn):
+        row = conn.execute(
+            "SELECT id, folder, done_at, original_folder FROM emails WHERE id = ?",
+            (email_id,),
+        ).fetchone()
+        if not row:
+            return {"success": False, "error": "Email not found"}
+        target_folder = row["original_folder"] or "INBOX"
+        conn.execute(
+            "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
+            (target_folder, email_id),
+        )
+        return {"success": True, "folder": target_folder}
+
+    result = _with_write_retry(work)
+    if result.get("success"):
+        triage_store.record_undone(email_id)
+    return result
 
 
 def move_email_local_folder(email_id: str, folder: str) -> dict:
-    conn = get_connection()
-    row = conn.execute("SELECT id FROM emails WHERE id = ?", (email_id,)).fetchone()
-    if not row:
-        conn.close()
-        return {"success": False, "error": "Email not found"}
-    conn.execute(
-        "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
-        (folder, email_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"success": True, "folder": folder}
+    def work(conn):
+        row = conn.execute("SELECT id FROM emails WHERE id = ?", (email_id,)).fetchone()
+        if not row:
+            return {"success": False, "error": "Email not found"}
+        conn.execute(
+            "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
+            (folder, email_id),
+        )
+        return {"success": True, "folder": folder}
+
+    return _with_write_retry(work)
 
 
 def delete_email_local(email_id: str) -> dict:
-    conn = get_connection()
-    cur = conn.execute("DELETE FROM emails WHERE id = ?", (email_id,))
-    conn.commit()
-    conn.close()
-    return {"success": cur.rowcount > 0}
+    def work(conn):
+        cur = conn.execute("DELETE FROM emails WHERE id = ?", (email_id,))
+        return {"success": cur.rowcount > 0}
+
+    return _with_write_retry(work)
 
 
 def record_processed_action(action: str, email_id: str = "", account_id: str = "") -> None:
     ts = datetime.now().isoformat()
-    conn = get_connection()
-    conn.execute(
-        """INSERT INTO processed_actions (email_id, account_id, action, created_at)
-           VALUES (?, ?, ?, ?)""",
-        (email_id, account_id, action, ts),
-    )
-    conn.commit()
-    conn.close()
+    def work(conn):
+        conn.execute(
+            """INSERT INTO processed_actions (email_id, account_id, action, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (email_id, account_id, action, ts),
+        )
+        return None
+
+    _with_write_retry(work)
     if action == "spam":
         triage_store.record_spam(email_id, account_id, ts)
 

@@ -27,4 +27,4 @@ if __name__ == "__main__":
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     print(f"\n Email Assistant — {acct_count} account(s) configured")
     print(f" http://localhost:{port}\n")
-    app.run(debug=False, port=port)
+    app.run(debug=False, port=port, threaded=True)

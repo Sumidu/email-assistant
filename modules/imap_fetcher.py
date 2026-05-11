@@ -11,6 +11,7 @@ import hashlib
 import html
 import imaplib
 import re
+import time
 from datetime import datetime
 
 from . import database
@@ -212,6 +213,7 @@ class IMAPFetcher:
                 continue
             uid_flags = self._parse_uid_flags(flag_data)
             updated += database.update_email_flags_batch(self.account_id, folder_name, uidvalidity, uid_flags)
+            time.sleep(0.02)
         return updated
 
     @staticmethod
@@ -223,8 +225,10 @@ class IMAPFetcher:
                     return item[1]
         return None
 
-    def _fetch_folder(self, conn, folder_name: str, limit: int, full_resync: bool = False) -> dict:
+    def _fetch_folder(self, conn, folder_name: str, limit: int, full_resync: bool = False, progress_callback=None) -> dict:
         try:
+            if progress_callback:
+                progress_callback(f"[{self.account_name}] Selecting «{folder_name}»…")
             status, _ = conn.select(f'"{folder_name}"', readonly=True)
             if status != "OK":
                 print(f"[IMAP] Could not select folder: {folder_name!r}")
@@ -234,11 +238,23 @@ class IMAPFetcher:
             return {"fetched": 0, "removed": 0, "remote": 0}
 
         uidvalidity = self._uidvalidity(conn)
+        if progress_callback:
+            progress_callback(f"[{self.account_name}] Reading remote UID list for «{folder_name}»…")
         remote_uids = self._all_remote_uids(conn)
+        remote_count = len(remote_uids) if remote_uids is not None else None
+        if progress_callback:
+            if remote_count is None:
+                progress_callback(f"[{self.account_name}] Remote count unavailable for «{folder_name}»")
+            else:
+                progress_callback(f"[{self.account_name}] «{folder_name}» has {remote_count} remote message(s)")
         removed = 0
         if remote_uids is not None:
             removed = database.remove_missing_remote_emails(self.account_id, folder_name, uidvalidity, remote_uids)
+        if progress_callback:
+            progress_callback(f"[{self.account_name}] Syncing read/star flags for «{folder_name}»…")
         flags_updated = self._sync_folder_flags(conn, folder_name, uidvalidity)
+        if progress_callback and flags_updated:
+            progress_callback(f"[{self.account_name}] Updated flags on {flags_updated} local message(s) in «{folder_name}»")
         mode = "all" if full_resync else self.imap_cfg.get("sync_mode", "recent")
         since_date = self.imap_cfg.get("sync_since", "")
         state = database.get_sync_state(self.account_id, folder_name)
@@ -246,11 +262,15 @@ class IMAPFetcher:
         if not full_resync and state and state.get("uidvalidity") == uidvalidity:
             last_seen_uid = int(state.get("last_seen_uid") or 0)
 
+        if progress_callback:
+            progress_callback(f"[{self.account_name}] Searching «{folder_name}» in {mode} mode…")
         uids = self._search_uids(conn, mode, limit, since_date, last_seen_uid)
+        if progress_callback:
+            progress_callback(f"[{self.account_name}] Found {len(uids)} candidate message(s) in «{folder_name}»")
         count = 0
         max_seen_uid = last_seen_uid
 
-        for uid in reversed(uids):
+        for idx, uid in enumerate(reversed(uids), start=1):
             try:
                 uid_int = int(uid)
                 max_seen_uid = max(max_seen_uid, uid_int)
@@ -265,6 +285,8 @@ class IMAPFetcher:
                             self._is_read_from_fetch_response(flag_data),
                             self._is_flagged_from_fetch_response(flag_data),
                         )
+                    if idx % 25 == 0:
+                        time.sleep(0.01)
                     continue
 
                 _, msg_data = conn.uid("fetch", uid, "(FLAGS RFC822)")
@@ -323,14 +345,22 @@ class IMAPFetcher:
                     "is_flagged": is_flagged,
                 })
                 count += 1
+                if progress_callback and (count == 1 or count % 25 == 0):
+                    progress_callback(f"[{self.account_name}] Fetched {count} new message(s) from «{folder_name}» ({idx}/{len(uids)} checked)")
+                if idx % 10 == 0:
+                    time.sleep(0.01)
 
             except Exception as exc:
                 print(f"[IMAP] Error on uid {uid}: {exc}")
+                if progress_callback:
+                    progress_callback(f"[{self.account_name}] Error on UID {uid!r} in «{folder_name}»: {exc}")
                 continue
 
         if uids:
             database.save_sync_state(self.account_id, folder_name, uidvalidity, max_seen_uid)
-        return {"fetched": count, "removed": removed, "flags_updated": flags_updated, "remote": len(remote_uids) if remote_uids is not None else None}
+        if progress_callback:
+            progress_callback(f"[{self.account_name}] Done «{folder_name}»: {count} fetched, {removed} removed, {flags_updated} flag update(s)")
+        return {"fetched": count, "removed": removed, "flags_updated": flags_updated, "remote": remote_count}
 
     # ---- IMAP folder discovery ---------------------------------------------
 
@@ -486,7 +516,7 @@ class IMAPFetcher:
                 if progress_callback:
                     action = "Rescanning all messages in" if full_resync else "Fetching"
                     progress_callback(f"[{self.account_name}] {action} «{fname}»…")
-                folder_result = self._fetch_folder(conn, fname, limit, full_resync=full_resync)
+                folder_result = self._fetch_folder(conn, fname, limit, full_resync=full_resync, progress_callback=progress_callback)
                 results["folders"][fname] = folder_result
                 if progress_callback and folder_result.get("removed"):
                     progress_callback(
