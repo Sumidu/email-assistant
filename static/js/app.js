@@ -816,7 +816,7 @@ async function markEmailDone(emailId=currentEmail?.id,{fromList=false}={}){
   optimisticRemoveEmailFromList(emailId,nextId);
   setStatus("Moved to local Finished folder","ok");
   try{
-    const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"POST"}).then(r=>r.json());
+    const res=await fetch(`/api/email/${encodeURIComponent(emailId)}/done`,{method:"POST",keepalive:true}).then(r=>r.json());
     if(!res.success){
       setStatus("Done failed: "+(res.error||"?"),"err");
       if(currentFolder)await loadEmailList(false,{preserveSelection:true});

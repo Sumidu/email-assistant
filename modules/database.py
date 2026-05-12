@@ -1152,16 +1152,21 @@ def init_triage_sync() -> None:
                 (FINISHED_FOLDER, state["done_at"], state.get("original_folder", "INBOX"), email_id),
             )
 
-    # Emails done locally but not in cloud → unmark (propagate unmark from another device)
+    # Emails done locally but not in cloud → keep local state and repair cloud.
+    # The triage store has no deletion tombstones, so absence in iCloud can mean
+    # either "unmarked elsewhere" or simply "not synced yet". Prefer not to
+    # resurrect finished mail into the inbox on app start.
     local_done = conn.execute(
-        "SELECT id, original_folder FROM emails WHERE done_at IS NOT NULL"
+        "SELECT id, done_at, original_folder FROM emails WHERE done_at IS NOT NULL"
     ).fetchall()
+    cloud_changed = False
     for row in local_done:
         if row["id"] not in cloud_done:
-            conn.execute(
-                "UPDATE emails SET folder = ?, done_at = NULL, original_folder = NULL WHERE id = ?",
-                (row["original_folder"] or "INBOX", row["id"]),
-            )
+            cloud_done[row["id"]] = {
+                "done_at": row["done_at"],
+                "original_folder": row["original_folder"] or "INBOX",
+            }
+            cloud_changed = True
 
     # Spam records in cloud but not locally → insert for daily counts
     for sp in cloud_spam:
@@ -1177,3 +1182,6 @@ def init_triage_sync() -> None:
 
     conn.commit()
     conn.close()
+    if cloud_changed:
+        data["done"] = cloud_done
+        triage_store.save_raw(data)
