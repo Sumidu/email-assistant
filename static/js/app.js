@@ -3484,16 +3484,45 @@ chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.
 loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(true);});
 
 // ─── Update checker ────────────────────────────────────────────────────────
+function _applyUpdateState(state){
+  const vEl=document.getElementById("settings-version");
+  if(vEl&&state.current_version)vEl.textContent=state.current_version;
+  if(state.available){
+    document.getElementById("update-version").textContent=state.version;
+    document.getElementById("update-modal").style.display="flex";
+    document.body.classList.add("update-available");
+  }
+}
+
 async function checkForUpdate(){
   try{
     const state=await fetch("/api/update_status").then(r=>r.json());
-    if(state.available){
-      document.getElementById("update-version").textContent=state.version;
-      document.getElementById("update-modal").style.display="flex";
-      document.body.classList.add("update-available");
-    }
+    _applyUpdateState(state);
   }catch{}
 }
+
+document.getElementById("btn-check-update").addEventListener("click",async()=>{
+  const btn=document.getElementById("btn-check-update");
+  const msg=document.getElementById("settings-update-msg");
+  btn.disabled=true;
+  btn.textContent="Checking…";
+  msg.textContent="";
+  try{
+    const state=await fetch("/api/update/check",{method:"POST"}).then(r=>r.json());
+    _applyUpdateState(state);
+    if(state.available){
+      msg.textContent=`Version ${state.version} available — see update prompt.`;
+    }else{
+      msg.textContent="You're up to date.";
+      setTimeout(()=>{ msg.textContent=""; },4000);
+    }
+  }catch{
+    msg.textContent="Check failed.";
+  }finally{
+    btn.disabled=false;
+    btn.textContent="Check for Updates";
+  }
+});
 
 document.getElementById("btn-update-now").addEventListener("click",async()=>{
   const btn=document.getElementById("btn-update-now");

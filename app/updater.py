@@ -104,7 +104,12 @@ def start_update_checker():
 
 
 def get_state() -> dict:
-    return _state
+    return {**_state, "current_version": get_current_version()}
+
+
+def trigger_check() -> dict:
+    _check_for_update()
+    return get_state()
 
 
 def download_and_install(dmg_url: str, app_path: str | None = None, progress_cb=None):

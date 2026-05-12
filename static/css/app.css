@@ -726,6 +726,12 @@ body.modal-open #progress-drawer{visibility:hidden;pointer-events:none;}
 ::-webkit-scrollbar{width:8px;height:8px;}
 ::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dim) 60%,transparent);border-radius:999px;border:2px solid transparent;background-clip:content-box;}
 
+/* ─── About / version row in settings ────────────────────────────────────── */
+.about-update-row{display:flex;align-items:center;gap:12px;padding:10px 0 4px;}
+.about-version-label{color:var(--muted);font-size:11px;flex-shrink:0;}
+.about-version-label span{color:var(--text);font-weight:600;}
+#settings-update-msg{color:var(--muted);font-size:11px;}
+
 /* ─── Update modal ────────────────────────────────────────────────────────── */
 .update-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(6px);}
 body.update-available #app{pointer-events:none;}

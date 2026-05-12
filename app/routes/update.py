@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from app.updater import get_state, download_and_install
+from app.updater import get_state, download_and_install, trigger_check
 from app.task_runner import run_background, task_status
 
 bp = Blueprint("update", __name__)
@@ -26,3 +26,8 @@ def update_install():
 
     run_background(do_install)
     return jsonify({"started": True})
+
+
+@bp.route("/api/update/check", methods=["POST"])
+def update_check():
+    return jsonify(trigger_check())
