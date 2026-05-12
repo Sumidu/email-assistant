@@ -16,6 +16,7 @@ def create_app(base_dir: str) -> Flask:
     from app.routes.system import bp as system_bp
     from app.routes.tasks import bp as tasks_bp
     from app.routes.todos import bp as todos_bp
+    from app.routes.update import bp as update_bp
 
     app = Flask(
         __name__,
@@ -40,7 +41,11 @@ def create_app(base_dir: str) -> Flask:
         mail_summary_bp,
         system_bp,
         todos_bp,
+        update_bp,
     ):
         app.register_blueprint(bp)
+
+    from app import updater
+    updater.start_update_checker()
 
     return app

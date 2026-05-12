@@ -586,6 +586,21 @@
 
 <div id="copy-toast">Copied</div>
 
+<!-- ── Update available modal ────────────────────────────────────────────── -->
+<div id="update-modal" class="update-overlay">
+  <div class="update-box">
+    <div class="update-header">Update Available</div>
+    <div class="update-body">
+      <p>A new version <span id="update-version"></span> is available.</p>
+      <p class="update-note">The app will restart to complete the update.</p>
+    </div>
+    <div class="update-footer">
+      <button id="btn-update-now" class="update-btn primary">Update Now</button>
+      <span id="update-progress-msg" class="update-progress-msg"></span>
+    </div>
+  </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/app.js', v='activity-console-20260511') }}"></script>
 </body>
 </html>

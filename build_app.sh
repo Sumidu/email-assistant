@@ -20,6 +20,16 @@ pip install --quiet pyinstaller pywebview
 echo "==> Cleaning previous build"
 rm -rf build dist
 
+echo "==> Embedding version from git tag"
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+if [ -n "$TAG" ]; then
+  VERSION="${TAG#v}"
+else
+  VERSION="0.0.0"
+fi
+echo "__version__ = \"$VERSION\"" > version.py
+echo "    version: $VERSION"
+
 echo "==> Running PyInstaller"
 pyinstaller EmailAssistant.spec
 

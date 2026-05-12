@@ -4,6 +4,7 @@
 
 import os
 block_cipher = None
+exec(open('version.py').read())
 
 a = Analysis(
     ['launcher.py'],
@@ -74,7 +75,7 @@ app = BUNDLE(
     info_plist={
         'NSPrincipalClass': 'NSApplication',
         'NSHighResolutionCapable': True,
-        'CFBundleShortVersionString': '0.2.0',
+        'CFBundleShortVersionString': __version__,
         'NSHumanReadableCopyright': '',
         # No LSUIElement — app shows in Dock like a normal window app
     },

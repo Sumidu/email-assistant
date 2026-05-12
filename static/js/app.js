@@ -3483,6 +3483,54 @@ chatInput.addEventListener("input",()=>{chatInput.style.height="auto";chatInput.
 
 loadMoreBtn.addEventListener("click",()=>{emailOffset+=PAGE_SIZE;loadEmailList(true);});
 
+// ─── Update checker ────────────────────────────────────────────────────────
+async function checkForUpdate(){
+  try{
+    const state=await fetch("/api/update_status").then(r=>r.json());
+    if(state.available){
+      document.getElementById("update-version").textContent=state.version;
+      document.getElementById("update-modal").style.display="flex";
+      document.body.classList.add("update-available");
+    }
+  }catch{}
+}
+
+document.getElementById("btn-update-now").addEventListener("click",async()=>{
+  const btn=document.getElementById("btn-update-now");
+  const msg=document.getElementById("update-progress-msg");
+  btn.disabled=true;
+  btn.textContent="Updating…";
+  try{
+    const res=await fetch("/api/update/install",{method:"POST"}).then(r=>r.json());
+    if(!res.started){
+      msg.textContent=res.error||"Update failed";
+      btn.disabled=false;
+      btn.textContent="Update Now";
+      return;
+    }
+    const pollInterval=setInterval(async()=>{
+      const status=await fetch("/api/task_status").then(r=>r.json());
+      if(status.progress&&status.progress.length){
+        msg.textContent=status.progress[status.progress.length-1]||"Installing…";
+      }
+      if(!status.running){
+        clearInterval(pollInterval);
+        if(status.result&&status.result.success===false){
+          msg.textContent=status.result.error||"Update failed";
+          btn.disabled=false;
+          btn.textContent="Update Now";
+        }
+      }
+    },800);
+  }catch(err){
+    msg.textContent=err.message;
+    btn.disabled=false;
+    btn.textContent="Update Now";
+  }
+});
+
+checkForUpdate();
+
 // ─── Init ─────────────────────────────────────────────────────────────────
 loadFolders();
 setStatus("Ready","idle");

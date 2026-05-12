@@ -29,6 +29,9 @@ build/
 *.swp
 *.swo
 
+# ── Generated version ─────────────────────────────────────────────────────────
+version.py
+
 # ── PyInstaller build artifacts ───────────────────────────────────────────────
 build/
 dist/
