@@ -42,6 +42,13 @@ The application SHALL provide a browser-based UI served by the local Flask appli
 - **AND** it SHALL encrypt the export with a user-provided password
 - **AND** it SHALL save the encrypted export to the app's iCloud Drive folder when available, falling back to local app storage.
 
+#### Scenario: Import portable configuration
+
+- **WHEN** the user imports a portable configuration snapshot
+- **THEN** the application SHALL accept an encrypted portable config envelope
+- **AND** it SHALL apply the non-secret settings to the current configuration
+- **AND** it SHALL NOT overwrite stored passwords or API keys from the import.
+
 ### Requirement: IMAP account configuration
 
 The application SHALL allow the user to configure one or more IMAP accounts.
@@ -122,6 +129,13 @@ The application SHALL synchronize emails from configured IMAP accounts into the 
 - **AND** a later sync sees the same remote message again
 - **THEN** the application SHALL keep the email in the local Finished folder
 - **AND** it SHALL NOT restore it to the active synced folder view.
+
+#### Scenario: Sync triage state across devices
+
+- **WHEN** the user marks an email finished or spam on one device
+- **THEN** the application SHALL write the triage decision to a JSON file in the iCloud Drive folder when available, falling back to local app storage
+- **AND** on startup the application SHALL merge the persisted triage file into the local database so that triage decisions made on another device take effect
+- **AND** new triage actions SHALL be recorded in the file in real time so they propagate to other devices via iCloud sync.
 
 ### Requirement: Email list and folder navigation
 
@@ -412,6 +426,45 @@ The application SHALL show lightweight feedback that helps the user continue pro
 - **THEN** the lower-left status area SHALL show how many emails the user has processed today
 - **AND** finished and spam actions SHALL contribute to the processed counter
 - **AND** the count SHALL update after finishing, unarchiving, or moving emails to spam.
+
+### Requirement: Mail summary
+
+The application SHALL provide an LLM-assisted mail summary that helps the user triage a date-bounded set of unfinished emails.
+
+#### Scenario: Generate a mail summary
+
+- **WHEN** the user requests a mail summary for a date range and optional account
+- **THEN** the application SHALL query locally stored unfinished non-sent emails for that scope
+- **AND** it SHALL send up to 120 emails to the selected LLM in a single prompt
+- **AND** the LLM SHALL return a structured response containing an executive summary and a ranked list of items with title, category, importance score, rationale, suggested action, and source email identifiers
+- **AND** the application SHALL associate each summary item with its source email records where the model's source references can be resolved.
+
+#### Scenario: Include knowledge context in mail summary
+
+- **WHEN** a mail summary is generated
+- **THEN** the application SHALL include relevant knowledge base entries in the LLM prompt
+- **AND** the prompt SHALL include only entries categorized as general knowledge rather than per-contact profiles.
+
+#### Scenario: Show mail summary results
+
+- **WHEN** the LLM returns a mail summary
+- **THEN** the application SHALL render the executive summary and the ranked item list
+- **AND** selecting a summary item SHALL show the linked source email.
+
+#### Scenario: Rate summary items
+
+- **WHEN** the user rates individual summary items
+- **THEN** the application SHALL accept a per-item email importance rating and a per-item topic importance rating
+- **AND** it SHALL persist the email importance rating back to the source email records in the local database
+- **AND** it SHALL append a structured feedback entry to a `mail_summary_preferences.md` file in the knowledge base
+- **AND** the feedback file SHALL include topic signals that future summaries can use to calibrate importance.
+
+#### Scenario: Parse summary output safely
+
+- **WHEN** the LLM returns reasoning, markdown fences, or malformed JSON
+- **THEN** the application SHALL attempt to recover complete summary items from partial output
+- **AND** it SHALL NOT treat each response line as a summary item
+- **AND** it SHALL only surface items that can be parsed into the expected structured format.
 
 ### Requirement: Draft generation and chat
 
