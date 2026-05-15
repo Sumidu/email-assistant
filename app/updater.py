@@ -19,14 +19,67 @@ _REPO_NAME = "email-assistant"
 _DMG_ASSET_NAME = "EmailAssistant.dmg"
 
 
-def get_current_version() -> str:
-    if getattr(sys, "frozen", False):
-        app_path = get_app_path()
-        info_plist_path = os.path.join(app_path, "Contents", "Info.plist")
-        if os.path.exists(info_plist_path):
-            with open(info_plist_path, "rb") as f:
+def _read_info_plist_version(path: str) -> str:
+    try:
+        if path and os.path.exists(path):
+            with open(path, "rb") as f:
                 plist = plistlib.load(f)
-            return plist.get("CFBundleShortVersionString", "dev")
+            version = plist.get("CFBundleShortVersionString")
+            if version:
+                return str(version)
+    except Exception as exc:
+        logger.debug("Could not read version from %s: %s", path, exc)
+    return ""
+
+
+def _candidate_info_plists() -> list[str]:
+    candidates = []
+    app_path = get_app_path()
+    if app_path:
+        candidates.append(os.path.join(app_path, "Contents", "Info.plist"))
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        cur = os.path.abspath(meipass)
+        for _ in range(5):
+            candidates.append(os.path.join(cur, "Info.plist"))
+            candidates.append(os.path.join(cur, "Contents", "Info.plist"))
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    deduped = []
+    for path in candidates:
+        if path and path not in deduped:
+            deduped.append(path)
+    return deduped
+
+
+def _bundle_version_from_foundation() -> str:
+    try:
+        from Foundation import NSBundle
+
+        info = NSBundle.mainBundle().infoDictionary()
+        version = info.get("CFBundleShortVersionString") if info else None
+        return str(version) if version else ""
+    except Exception as exc:
+        logger.debug("Could not read version from NSBundle: %s", exc)
+        return ""
+
+
+def get_current_version() -> str:
+    for info_plist_path in _candidate_info_plists():
+        version = _read_info_plist_version(info_plist_path)
+        if version:
+            return version
+    version = _bundle_version_from_foundation()
+    if version:
+        return version
+    try:
+        from version import __version__
+
+        return str(__version__)
+    except Exception:
+        pass
     return "dev"
 
 
