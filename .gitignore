@@ -16,6 +16,8 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
 dist/
 build/
 
@@ -36,6 +38,9 @@ version.py
 build/
 dist/
 *.spec.bak
+
+# ── Documentation build artifacts ────────────────────────────────────────────
+docs/_build/
 
 # ── Claude Code internal ──────────────────────────────────────────────────────
 .claude/

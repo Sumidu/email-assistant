@@ -17,9 +17,18 @@ python main.py
 
 # Install a new dep
 pip install <pkg> && pip freeze | grep <pkg> >> requirements.txt
+
+# Smoke checks
+pytest
+ruff check .
+python -m py_compile main.py launcher.py app/*.py app/routes/*.py modules/*.py
+node --check static/js/app.js
+sphinx-build -b html docs docs/_build/html
 ```
 
-No test suite. No linter configured.
+Smoke tests, Ruff correctness checks, and Sphinx developer docs are configured
+through `pyproject.toml`. Keep tests free of live IMAP, Keychain, LLM, and
+network dependencies unless explicitly marked otherwise.
 
 ## Architecture
 

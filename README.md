@@ -98,6 +98,27 @@ open http://localhost:5100
 
 ---
 
+## Developer Workflow
+
+Developer tooling is configured in `pyproject.toml`.
+
+```bash
+# Install app + developer tools
+python -m pip install -e ".[dev]"
+
+# Run the smoke checks used by CI
+pytest
+ruff check .
+python -m py_compile main.py launcher.py app/*.py app/routes/*.py modules/*.py
+node --check static/js/app.js
+sphinx-build -b html docs docs/_build/html
+```
+
+Developer documentation starts at `docs/index.md` and links to the OpenSpec
+requirements under `openspec/`.
+
+---
+
 ## Configuration
 
 Config is stored at `~/Library/Application Support/Email Assistant/config.json` — **outside the repo**, so it survives updates and rebuilds. On first run a default file is created automatically and legacy data from `~/email_assistant` is copied into the new macOS locations.
