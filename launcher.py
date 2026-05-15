@@ -10,13 +10,27 @@ import urllib.request
 import time
 import sys
 import os
+import socket
 
 import webview
 
 # Import the Flask app (all routes are registered on import)
 import main as server_module
 
-PORT = server_module.config.get("app", {}).get("port", 5100)
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _select_port() -> int:
+    if getattr(sys, "frozen", False):
+        return _free_local_port()
+    return int(server_module.config.get("app", {}).get("port", 5100))
+
+
+PORT = _select_port()
 URL  = f"http://127.0.0.1:{PORT}"
 
 
