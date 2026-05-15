@@ -35,7 +35,8 @@ jobs:
           python -m py_compile \
             main.py launcher.py \
             app/__init__.py app/runtime.py app/task_runner.py app/updater.py \
-            app/routes/*.py modules/*.py
+            app/routes/*.py app/services/*.py \
+            modules/*.py modules/db/*.py modules/imap/*.py modules/knowledge/*.py
 
       - name: Check frontend syntax
         run: node --check static/js/app.js

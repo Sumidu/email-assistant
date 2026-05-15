@@ -15,3 +15,9 @@ Application Package API
 
 .. automodule:: app.updater
    :members:
+
+.. automodule:: app.services.mail_summary
+   :members:
+
+.. automodule:: app.services.todos
+   :members:

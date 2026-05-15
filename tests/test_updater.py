@@ -1,4 +1,5 @@
 import plistlib
+import urllib.error
 
 from app import updater
 
@@ -21,3 +22,17 @@ def test_current_version_reads_app_info_plist(monkeypatch, tmp_path):
     monkeypatch.delattr(updater.sys, "_MEIPASS", raising=False)
 
     assert updater.get_current_version() == "1.2.3"
+
+
+def test_update_check_reports_network_errors(monkeypatch):
+    def fail_urlopen(*args, **kwargs):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", fail_urlopen)
+    monkeypatch.setattr(updater, "get_current_version", lambda: "0.3.4")
+
+    state = updater.trigger_check()
+
+    assert state["available"] is False
+    assert "offline" in state["error"]
+    assert state["current_version"] == "0.3.4"

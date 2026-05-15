@@ -3512,6 +3512,8 @@ document.getElementById("btn-check-update").addEventListener("click",async()=>{
     _applyUpdateState(state);
     if(state.available){
       msg.textContent=`Version ${state.version} available — see update prompt.`;
+    }else if(state.error){
+      msg.textContent=`Check failed: ${state.error}`;
     }else{
       msg.textContent="You're up to date.";
       setTimeout(()=>{ msg.textContent=""; },4000);

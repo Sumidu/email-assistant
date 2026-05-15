@@ -1,14 +1,16 @@
 import sqlite3
 import json
 import os
-import email.utils
-import re
 import time
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app import paths
 from modules import triage_store
+from modules.db import dates as db_dates
+from modules.db import filters as db_filters
+from modules.db import schema as db_schema
+from modules.db import threads as db_threads
 
 DB_PATH = str(paths.DB_PATH)
 FINISHED_FOLDER = "Finished"
@@ -50,106 +52,9 @@ def init_db():
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
 
-    def email_columns():
-        return [r[1] for r in conn.execute("PRAGMA table_info(emails)").fetchall()]
-
-    def ensure_email_column(name: str, ddl: str):
-        if name not in email_columns():
-            conn.execute(f"ALTER TABLE emails ADD COLUMN {ddl}")
-
     # Create the current schema for fresh installs. Existing databases are
-    # migrated below before any indexes rely on newer columns.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS emails (
-            id          TEXT PRIMARY KEY,
-            account_id  TEXT NOT NULL DEFAULT 'default',
-            folder      TEXT,
-            subject     TEXT,
-            sender      TEXT,
-            recipients  TEXT,
-            date        TEXT,
-            date_ts     REAL,
-            body_text   TEXT,
-            body_html   TEXT,
-            message_id  TEXT,
-            in_reply_to TEXT,
-            references_header TEXT,
-            thread_id   TEXT,
-            fetched_at  TEXT,
-            kb_processed_at TEXT,
-            done_at     TEXT,
-            original_folder TEXT,
-            imap_uid    INTEGER,
-            uidvalidity TEXT,
-            is_read     INTEGER DEFAULT 1,
-            is_flagged  INTEGER DEFAULT 0,
-            flags_synced_at TEXT,
-            email_importance INTEGER,
-            email_importance_note TEXT,
-            email_importance_updated_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS sync_state (
-            account_id    TEXT NOT NULL,
-            folder        TEXT NOT NULL,
-            uidvalidity   TEXT,
-            last_seen_uid INTEGER DEFAULT 0,
-            last_sync_at  TEXT,
-            PRIMARY KEY (account_id, folder)
-        );
-        CREATE TABLE IF NOT EXISTS calendar_events (
-            account_id  TEXT NOT NULL,
-            uid         TEXT NOT NULL,
-            occurrence  TEXT NOT NULL,
-            title       TEXT,
-            start_ts    REAL NOT NULL,
-            end_ts      REAL NOT NULL,
-            start_iso   TEXT NOT NULL,
-            end_iso     TEXT NOT NULL,
-            all_day     INTEGER DEFAULT 0,
-            location    TEXT,
-            description TEXT,
-            source      TEXT,
-            updated_at  TEXT,
-            PRIMARY KEY (account_id, uid, occurrence)
-        );
-        CREATE TABLE IF NOT EXISTS processed_actions (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            email_id    TEXT,
-            account_id  TEXT,
-            action      TEXT NOT NULL,
-            created_at  TEXT NOT NULL
-        );
-    """)
-
-    ensure_email_column("account_id", "account_id TEXT NOT NULL DEFAULT 'default'")
-    ensure_email_column("date_ts", "date_ts REAL")
-    ensure_email_column("kb_processed_at", "kb_processed_at TEXT")
-    ensure_email_column("done_at", "done_at TEXT")
-    ensure_email_column("original_folder", "original_folder TEXT")
-    ensure_email_column("imap_uid", "imap_uid INTEGER")
-    ensure_email_column("uidvalidity", "uidvalidity TEXT")
-    ensure_email_column("references_header", "references_header TEXT")
-    ensure_email_column("thread_id", "thread_id TEXT")
-    ensure_email_column("is_read", "is_read INTEGER DEFAULT 1")
-    ensure_email_column("is_flagged", "is_flagged INTEGER DEFAULT 0")
-    ensure_email_column("flags_synced_at", "flags_synced_at TEXT")
-    ensure_email_column("email_importance", "email_importance INTEGER")
-    ensure_email_column("email_importance_note", "email_importance_note TEXT")
-    ensure_email_column("email_importance_updated_at", "email_importance_updated_at TEXT")
-
-    conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
-        CREATE INDEX IF NOT EXISTS idx_emails_date   ON emails(date);
-        CREATE INDEX IF NOT EXISTS idx_emails_account  ON emails(account_id);
-        CREATE INDEX IF NOT EXISTS idx_emails_acct_fld ON emails(account_id, folder);
-        CREATE INDEX IF NOT EXISTS idx_emails_imap_uid ON emails(account_id, folder, uidvalidity, imap_uid);
-        CREATE INDEX IF NOT EXISTS idx_emails_thread ON emails(account_id, thread_id);
-        CREATE INDEX IF NOT EXISTS idx_emails_acct_fld_thread ON emails(account_id, folder, thread_id);
-        CREATE INDEX IF NOT EXISTS idx_emails_importance ON emails(email_importance);
-        CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start ON calendar_events(account_id, start_ts);
-        CREATE INDEX IF NOT EXISTS idx_processed_actions_created ON processed_actions(created_at);
-        CREATE INDEX IF NOT EXISTS idx_processed_actions_action ON processed_actions(action, created_at);
-    """)
+    # migrated before any indexes rely on newer columns.
+    db_schema.ensure_current_schema(conn)
 
     # Migrate: prefix existing IDs with 'default::' to match the composite-ID scheme
     needs_prefix = conn.execute(
@@ -179,51 +84,23 @@ def init_db():
 
 
 def _parse_email_date_ts(value: str) -> Optional[float]:
-    try:
-        parsed = email.utils.parsedate_to_datetime(value)
-        if parsed is None:
-            return None
-        if parsed.tzinfo is None:
-            return parsed.timestamp()
-        return parsed.timestamp()
-    except Exception:
-        return None
+    return db_dates.parse_email_date_ts(value)
 
 
 def _local_date_start_ts(value: str) -> Optional[float]:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").timestamp()
-    except (TypeError, ValueError):
-        return None
+    return db_dates.local_date_start_ts(value)
 
 
 def _message_id_tokens(value: str) -> list[str]:
-    if not value:
-        return []
-    tokens = re.findall(r"<[^>]+>", value)
-    if not tokens and value.strip():
-        tokens = [value.strip()]
-    cleaned = []
-    for token in tokens:
-        token = token.strip().strip("<>").strip().lower()
-        if token and token not in cleaned:
-            cleaned.append(token)
-    return cleaned
+    return db_threads.message_id_tokens(value)
 
 
 def _thread_seed(message_id: str = "", in_reply_to: str = "", references_header: str = "") -> str:
-    refs = _message_id_tokens(references_header)
-    if refs:
-        return refs[0]
-    replies = _message_id_tokens(in_reply_to)
-    if replies:
-        return replies[0]
-    own = _message_id_tokens(message_id)
-    return own[0] if own else (message_id or "").strip().lower()
+    return db_threads.thread_seed(message_id, in_reply_to, references_header)
 
 
 def _thread_id_for(account_id: str, seed: str) -> str:
-    return f"{account_id}::{seed}" if seed else f"{account_id}::unknown"
+    return db_threads.thread_id_for(account_id, seed)
 
 
 def _backfill_thread_ids(conn) -> None:
@@ -356,30 +233,11 @@ def save_email(data):
 
 
 def _apply_importance_filter(where: list[str], params: list, importance=None) -> None:
-    importance = str(importance or "").strip().lower()
-    if not importance:
-        return
-    if importance == "unrated":
-        where.append("email_importance IS NULL")
-        return
-    try:
-        rating = int(importance)
-    except (TypeError, ValueError):
-        return
-    if 1 <= rating <= 5:
-        where.append("email_importance = ?")
-        params.append(rating)
+    db_filters.apply_importance_filter(where, params, importance)
 
 
 def _apply_status_filter(where: list[str], status=None) -> None:
-    status = str(status or "").strip().lower()
-    if status == "unread":
-        where.append("is_read = 0")
-    elif status == "flagged":
-        where.append("is_flagged = 1")
-    elif status in ("unread_flagged", "flagged_unread"):
-        where.append("is_read = 0")
-        where.append("is_flagged = 1")
+    db_filters.apply_status_filter(where, status)
 
 
 def get_emails(folder="INBOX", limit=60, offset=0, account_id=None, search="", importance=None, status=None):
@@ -551,26 +409,7 @@ def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
 
 
 def _email_filter_where(folder: str, account_id=None, search="", importance=None, status=None) -> tuple[list[str], list]:
-    where = ["folder = ?"]
-    params = [folder]
-    if account_id:
-        where.append("account_id = ?")
-        params.append(account_id)
-    search = (search or "").strip()
-    if search:
-        like = f"%{search}%"
-        where.append(
-            """(
-                subject LIKE ? COLLATE NOCASE OR
-                sender LIKE ? COLLATE NOCASE OR
-                recipients LIKE ? COLLATE NOCASE OR
-                body_text LIKE ? COLLATE NOCASE
-            )"""
-        )
-        params.extend([like, like, like, like])
-    _apply_importance_filter(where, params, importance)
-    _apply_status_filter(where, status)
-    return where, params
+    return db_filters.email_filter_where(folder, account_id=account_id, search=search, importance=importance, status=status)
 
 
 def count_emails_for_finish(folder: str, account_id=None, search="", importance=None, status=None) -> int:

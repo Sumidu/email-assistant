@@ -10,8 +10,12 @@ window; browser mode starts the same Flask app on port `5100`.
   starts Flask in a background thread for the `.app` bundle.
 - **Routes**: `app/routes/` exposes JSON APIs for email, accounts, settings,
   knowledge, tasks, logs, calendar, todos, and updates.
+- **Services**: `app/services/` contains route-adjacent parsing and rendering
+  helpers that can be tested without Flask request contexts.
 - **Domain modules**: `modules/` owns IMAP sync, SQLite persistence, knowledge
   generation, response generation, calendar storage, logging, and triage state.
+  Large public modules keep compatibility facades while internals move into
+  smaller packages such as `modules/db`, `modules/imap`, and `modules/knowledge`.
 - **Frontend**: `templates/index.html`, `static/js/app.js`, and
   `static/css/app.css` implement the single-page UI.
 - **Runtime data**: configuration, SQLite, logs, and knowledge files live under

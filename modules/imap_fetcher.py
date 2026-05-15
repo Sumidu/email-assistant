@@ -5,16 +5,15 @@ Each IMAPFetcher instance represents one email account.
 """
 
 import email
-import email.header
 import email.utils
 import hashlib
-import html
 import imaplib
 import re
 import time
-from datetime import datetime, timedelta
 
 from . import database
+from modules.imap import parsing as imap_parsing
+from modules.imap import planning as imap_planning
 
 
 # ---------------------------------------------------------------------------
@@ -22,65 +21,15 @@ from . import database
 # ---------------------------------------------------------------------------
 
 def decode_header_value(value: str) -> str:
-    if not value:
-        return ""
-    parts = email.header.decode_header(value)
-    result = []
-    for raw, charset in parts:
-        if isinstance(raw, bytes):
-            result.append(raw.decode(charset or "utf-8", errors="replace"))
-        else:
-            result.append(str(raw))
-    return "".join(result)
+    return imap_parsing.decode_header_value(value)
 
 
 def html_to_text(raw_html: str) -> str:
-    text = re.sub(r"<(script|style)[^>]*>.*?</(script|style)>",
-                  "", raw_html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html.unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return imap_parsing.html_to_text(raw_html)
 
 
 def extract_bodies(msg) -> tuple[str, str]:
-    plain, htm = "", ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            ctype = part.get_content_type()
-            disp = str(part.get("Content-Disposition", ""))
-            if "attachment" in disp:
-                continue
-            charset = part.get_content_charset() or "utf-8"
-            try:
-                payload = part.get_payload(decode=True)
-                if not payload:
-                    continue
-                decoded = payload.decode(charset, errors="replace")
-                if ctype == "text/plain" and not plain:
-                    plain = decoded
-                elif ctype == "text/html" and not htm:
-                    htm = decoded
-            except Exception:
-                pass
-    else:
-        ctype = msg.get_content_type()
-        charset = msg.get_content_charset() or "utf-8"
-        try:
-            payload = msg.get_payload(decode=True)
-            if payload:
-                decoded = payload.decode(charset, errors="replace")
-                if ctype == "text/plain":
-                    plain = decoded
-                elif ctype == "text/html":
-                    htm = decoded
-        except Exception:
-            pass
-    if not plain and htm:
-        plain = html_to_text(htm)
-    return plain.strip(), htm.strip()
+    return imap_parsing.extract_bodies(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +57,7 @@ class IMAPFetcher:
 
     @staticmethod
     def _quote_folder(folder_name: str) -> str:
-        escaped = (folder_name or "").replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+        return imap_parsing.quote_folder(folder_name)
 
     # ---- fetching ----------------------------------------------------------
 
@@ -123,29 +71,10 @@ class IMAPFetcher:
         return ""
 
     def _search_uids(self, conn, mode: str, limit: int, since_date: str, last_seen_uid: int) -> list[bytes]:
-        if last_seen_uid > 0:
-            status, data = conn.uid("search", None, "UID", f"{last_seen_uid + 1}:*")
-        elif mode == "since" and since_date:
-            try:
-                parsed = datetime.fromisoformat(since_date).strftime("%d-%b-%Y")
-            except Exception:
-                parsed = since_date
-            status, data = conn.uid("search", None, "SINCE", parsed)
-        else:
-            status, data = conn.uid("search", None, "ALL")
-        if status != "OK" or not data:
-            return []
-        uids = data[0].split()
-        if mode == "recent" and limit > 0 and last_seen_uid <= 0:
-            uids = uids[-limit:]
-        return uids
+        return imap_planning.search_uids(conn, mode, limit, since_date, last_seen_uid)
 
     def _search_recent_uids(self, conn, days: int = 7) -> list[bytes]:
-        since = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
-        status, data = conn.uid("search", None, "SINCE", since)
-        if status != "OK" or not data:
-            return []
-        return data[0].split()
+        return imap_planning.search_recent_uids(conn, days=days)
 
     def _all_remote_uids(self, conn) -> set[int] | None:
         status, data = conn.uid("search", None, "ALL")
@@ -161,48 +90,23 @@ class IMAPFetcher:
 
     @staticmethod
     def _fetch_response_flags(fetch_data) -> bytes:
-        chunks = []
-        for item in fetch_data or []:
-            if isinstance(item, tuple):
-                chunks.append(item[0] if isinstance(item[0], bytes) else str(item[0]).encode())
-            elif isinstance(item, bytes):
-                chunks.append(item)
-        return b" ".join(chunks)
+        return imap_parsing.fetch_response_flags(fetch_data)
 
     @classmethod
     def _flags_from_fetch_response(cls, fetch_data) -> set[bytes]:
-        flags_blob = cls._fetch_response_flags(fetch_data)
-        match = re.search(br"FLAGS \(([^)]*)\)", flags_blob, flags=re.IGNORECASE)
-        return set(match.group(1).lower().split()) if match else set()
+        return imap_parsing.flags_from_fetch_response(fetch_data)
 
     @classmethod
     def _is_read_from_fetch_response(cls, fetch_data) -> bool:
-        return b"\\seen" in cls._flags_from_fetch_response(fetch_data)
+        return imap_parsing.is_read_from_fetch_response(fetch_data)
 
     @classmethod
     def _is_flagged_from_fetch_response(cls, fetch_data) -> bool:
-        return b"\\flagged" in cls._flags_from_fetch_response(fetch_data)
+        return imap_parsing.is_flagged_from_fetch_response(fetch_data)
 
     @staticmethod
     def _parse_uid_flags(fetch_data) -> dict[int, dict]:
-        parsed = {}
-        for item in fetch_data or []:
-            if isinstance(item, tuple):
-                blob = item[0] if isinstance(item[0], bytes) else str(item[0]).encode()
-            elif isinstance(item, bytes):
-                blob = item
-            else:
-                continue
-            uid_match = re.search(br"\bUID\s+(\d+)\b", blob, flags=re.IGNORECASE)
-            flags_match = re.search(br"FLAGS\s+\(([^)]*)\)", blob, flags=re.IGNORECASE)
-            if not uid_match or not flags_match:
-                continue
-            flags = set(flags_match.group(1).lower().split())
-            parsed[int(uid_match.group(1))] = {
-                "is_read": b"\\seen" in flags,
-                "is_flagged": b"\\flagged" in flags,
-            }
-        return parsed
+        return imap_parsing.parse_uid_flags(fetch_data)
 
     def _sync_folder_flags(self, conn, folder_name: str, uidvalidity: str) -> int:
         """Mirror remote IMAP read/flagged state without downloading bodies."""
@@ -244,12 +148,7 @@ class IMAPFetcher:
 
     @staticmethod
     def _raw_message_from_fetch_response(fetch_data):
-        for item in fetch_data or []:
-            if isinstance(item, tuple) and item[1]:
-                header = item[0] if isinstance(item[0], bytes) else str(item[0]).encode()
-                if b"RFC822" in header:
-                    return item[1]
-        return None
+        return imap_parsing.raw_message_from_fetch_response(fetch_data)
 
     def _fetch_folder(self, conn, folder_name: str, limit: int, full_resync: bool = False, progress_callback=None) -> dict:
         try:

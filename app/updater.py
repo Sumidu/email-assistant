@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_state: dict = {"available": False}
+_state: dict = {"available": False, "error": None}
 _timer: threading.Timer | None = None
 _UPDATE_CHECK_INTERVAL = 86400
 _REPO_OWNER = "Sumidu"
@@ -119,18 +119,19 @@ def _check_for_update():
                 dmg_url = asset.get("browser_download_url")
                 break
         if not dmg_url:
-            logger.warning("No %s asset found in release %s", _DMG_ASSET_NAME, latest_tag)
-            _state = {"available": False}
+            msg = f"No {_DMG_ASSET_NAME} asset found in release {latest_tag or '(unknown)'}"
+            logger.warning(msg)
+            _state = {"available": False, "error": msg}
             return
         if _version_gt(latest_version, current):
-            _state = {"available": True, "version": latest_version, "dmg_url": dmg_url}
+            _state = {"available": True, "version": latest_version, "dmg_url": dmg_url, "error": None}
             logger.info("Update available: %s (current: %s)", latest_version, current)
         else:
-            _state = {"available": False}
+            _state = {"available": False, "error": None}
             logger.info("No update available. Latest: %s, current: %s", latest_version, current)
     except Exception as exc:
         logger.error("Update check failed: %s", exc)
-        _state = {"available": False}
+        _state = {"available": False, "error": str(exc)}
 
 
 def _schedule_next():

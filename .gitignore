@@ -6,7 +6,7 @@ config.json
 *.db
 *.sqlite
 *.sqlite3
-knowledge/
+/knowledge/
 llm_requests.log
 
 # ── Python ────────────────────────────────────────────────────────────────────

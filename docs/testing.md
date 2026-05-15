@@ -9,6 +9,7 @@ should not require IMAP, Keychain, LM Studio, GitHub, or network access.
 pytest
 ruff check .
 python -m py_compile main.py launcher.py app/*.py app/routes/*.py modules/*.py
+python -m py_compile app/services/*.py modules/db/*.py modules/imap/*.py modules/knowledge/*.py
 node --check static/js/app.js
 sphinx-build -b html docs docs/_build/html
 ```
@@ -19,4 +20,5 @@ sphinx-build -b html docs docs/_build/html
 - Keep updater/version helpers deterministic.
 - Keep config import/export from leaking or overwriting secrets.
 - Keep IMAP sync helper decisions testable without a live server.
+- Keep mail summary and todo parsing/rendering testable without Flask or an LLM.
 - Extract pure helpers before refactoring larger modules.

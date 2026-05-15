@@ -17,6 +17,17 @@ by feature area and call into long-lived runtime objects from `app.runtime`.
 coordinates with `modules.triage_store` so local finished/spam state can be
 persisted and repaired across app starts.
 
+The public import surface is intentionally still `modules.database`. Internals
+are being extracted behind that facade into `modules/db` for schema setup,
+date/thread helpers, and query filters.
+
+## Route Services
+
+Routes remain the public HTTP boundary. Pure parsing, normalization, and export
+helpers should live in `app/services` so they can be tested without Flask, IMAP,
+LLM, or network dependencies. Current examples include mail summary JSON/source
+matching and todo parsing/ICS rendering.
+
 ## Background Tasks
 
 Long-running operations use `app.task_runner.run_background()`. Only one task
