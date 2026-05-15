@@ -117,6 +117,9 @@ sphinx-build -b html docs docs/_build/html
 Developer documentation starts at `docs/index.md` and links to the OpenSpec
 requirements under `openspec/`.
 
+The same docs are published by GitHub Pages after each docs-related push:
+[sumidu.github.io/email-assistant](https://sumidu.github.io/email-assistant/).
+
 ---
 
 ## Configuration
