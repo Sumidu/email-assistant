@@ -127,6 +127,35 @@ class IMAPFetcher:
             time.sleep(0.02)
         return updated
 
+    def _sync_flagged_uids(self, conn, folder_name: str, uidvalidity: str) -> int:
+        """Mirror the server's complete flagged set locally.
+
+        Covers old emails flagged after their initial sync (invisible to the
+        SINCE-based recent flag sync) and clears flags for emails unflagged
+        remotely outside the recent sync window.
+        """
+        if not uidvalidity:
+            return 0
+        flagged_uids = imap_planning.search_flagged_uids(conn)
+        updated = 0
+        flagged_uid_set: set[int] = set()
+        chunk_size = 200
+        for idx in range(0, len(flagged_uids), chunk_size):
+            chunk = flagged_uids[idx:idx + chunk_size]
+            uid_set = ",".join(
+                uid.decode() if isinstance(uid, bytes) else str(uid)
+                for uid in chunk
+            )
+            status, flag_data = conn.uid("fetch", uid_set, "(UID FLAGS)")
+            if status != "OK" or not flag_data:
+                continue
+            uid_flags = self._parse_uid_flags(flag_data)
+            flagged_uid_set.update(uid_flags.keys())
+            updated += database.update_email_flags_batch(self.account_id, folder_name, uidvalidity, uid_flags)
+            time.sleep(0.02)
+        updated += database.clear_stale_flags(self.account_id, folder_name, uidvalidity, flagged_uid_set)
+        return updated
+
     def _sync_recent_folder_flags(self, conn, folder_name: str, uidvalidity: str, days: int = 7) -> int:
         """Mirror recent IMAP read/flagged state without auditing the whole folder."""
         if not uidvalidity:
@@ -288,6 +317,10 @@ class IMAPFetcher:
             flags_updated += recent_flags_updated
             if progress_callback:
                 progress_callback(f"[{self.account_name}] Recent flag sync updated {recent_flags_updated} local message(s) in «{folder_name}»")
+            flagged_updated = self._sync_flagged_uids(conn, folder_name, uidvalidity)
+            flags_updated += flagged_updated
+            if progress_callback and flagged_updated:
+                progress_callback(f"[{self.account_name}] Flagged-UID sync updated {flagged_updated} local message(s) in «{folder_name}»")
         if progress_callback:
             progress_callback(f"[{self.account_name}] Done «{folder_name}»: {count} fetched, {removed} removed, {flags_updated} flag update(s)")
         return {"fetched": count, "removed": removed, "flags_updated": flags_updated, "remote": remote_count}

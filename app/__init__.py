@@ -48,4 +48,8 @@ def create_app(base_dir: str) -> Flask:
     from app import updater
     updater.start_update_checker()
 
+    from app import dev_reload
+    app.register_blueprint(dev_reload.bp)
+    dev_reload.start_watcher()
+
     return app

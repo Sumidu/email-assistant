@@ -520,6 +520,10 @@ function setupAutoSyncTimer(){
 // ─── Email list ───────────────────────────────────────────────────────────
 async function loadEmailList(append=false,{preserveSelection=false,clearMissingSelection=false}={}){
   if(!currentFolder)return;
+  if(!append){
+    emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Loading…</div>';
+    setStatus("Loading…","busy");
+  }
   try{
     const selectedId=preserveSelection?currentEmail?.id:null;
     const q=searchInput.value.trim();
@@ -541,6 +545,7 @@ async function loadEmailList(append=false,{preserveSelection=false,clearMissingS
       :(allEmailsLocal.length>=PAGE_SIZE?allEmailsLocal.length+"+":""+allEmailsLocal.length);
     renderEmailList(emails,append);
     loadMoreBtn.style.display=emails.length>=PAGE_SIZE?"block":"none";
+    if(!append)setStatus("Ready","idle");
     if(selectedId){
       const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(selectedId)}"]`);
       if(row)row.classList.add("selected");
@@ -3561,6 +3566,19 @@ document.getElementById("btn-update-now").addEventListener("click",async()=>{
 });
 
 checkForUpdate();
+
+// ─── Dev hot-reload ───────────────────────────────────────────────────────
+(function(){
+  let _devStartedAt=null;
+  async function _devPing(){
+    try{
+      const d=await fetch("/api/dev/ping").then(r=>r.json());
+      if(_devStartedAt===null){_devStartedAt=d.started_at;return;}
+      if(d.started_at!==_devStartedAt)window.location.reload();
+    }catch(_){}
+  }
+  setInterval(_devPing,2000);
+})();
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 loadFolders();

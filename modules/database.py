@@ -392,6 +392,46 @@ def update_email_flags_batch(account_id: str, folder: str, uidvalidity: str, uid
     return total
 
 
+def clear_stale_flags(account_id: str, folder: str, uidvalidity: str, flagged_uid_set: set) -> int:
+    """Set is_flagged=0 for locally-flagged rows whose UID is not in flagged_uid_set.
+
+    When flagged_uid_set is empty, clears all is_flagged rows for this folder scope.
+    Returns the number of rows updated.
+    """
+    if not uidvalidity:
+        return 0
+    now = datetime.now().isoformat()
+
+    def work(conn):
+        if flagged_uid_set:
+            placeholders = ",".join("?" * len(flagged_uid_set))
+            cur = conn.execute(
+                f"""UPDATE emails
+                       SET is_flagged = 0,
+                           flags_synced_at = ?
+                     WHERE account_id = ?
+                       AND uidvalidity = ?
+                       AND (folder = ? OR original_folder = ?)
+                       AND is_flagged = 1
+                       AND imap_uid NOT IN ({placeholders})""",
+                [now, account_id, uidvalidity, folder, folder, *flagged_uid_set],
+            )
+        else:
+            cur = conn.execute(
+                """UPDATE emails
+                      SET is_flagged = 0,
+                          flags_synced_at = ?
+                    WHERE account_id = ?
+                      AND uidvalidity = ?
+                      AND (folder = ? OR original_folder = ?)
+                      AND is_flagged = 1""",
+                [now, account_id, uidvalidity, folder, folder],
+            )
+        return int(cur.rowcount or 0)
+
+    return _with_write_retry(work)
+
+
 def update_email_importance(email_id: str, rating: int, note: str = "") -> bool:
     rating = max(1, min(5, int(rating or 3)))
     conn = get_connection()

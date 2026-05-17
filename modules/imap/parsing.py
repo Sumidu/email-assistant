@@ -26,6 +26,14 @@ def html_to_text(raw_html: str) -> str:
     return text.strip()
 
 
+def _safe_charset(charset: str) -> str:
+    cs = (charset or "utf-8").lower().strip()
+    # Non-standard names used by some mail clients for unspecified 8-bit encodings
+    if cs in ("unknown-8bit", "unknown", "x-unknown", "x-user-defined"):
+        return "latin-1"
+    return charset or "utf-8"
+
+
 def extract_bodies(msg) -> tuple[str, str]:
     plain, htm = "", ""
     if msg.is_multipart():
@@ -34,7 +42,7 @@ def extract_bodies(msg) -> tuple[str, str]:
             disp = str(part.get("Content-Disposition", ""))
             if "attachment" in disp:
                 continue
-            charset = part.get_content_charset() or "utf-8"
+            charset = _safe_charset(part.get_content_charset())
             try:
                 payload = part.get_payload(decode=True)
                 if not payload:
@@ -48,7 +56,7 @@ def extract_bodies(msg) -> tuple[str, str]:
                 pass
     else:
         ctype = msg.get_content_type()
-        charset = msg.get_content_charset() or "utf-8"
+        charset = _safe_charset(msg.get_content_charset())
         try:
             payload = msg.get_payload(decode=True)
             if payload:

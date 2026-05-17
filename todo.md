@@ -39,6 +39,26 @@ Effort scale:
   - Clarification: Moving an email to spam should count as mail processed today.
   - Notes: Consider renaming the counter from `finished today` to `processed today`, or track finished and spam separately.
 
+- [x] Fix flag sync for emails flagged after initial download
+  - Category: Bug / Sync
+  - Clarification: Normal sync only updated flags for emails received in the last 7 days (SINCE search). Added SEARCH FLAGGED pass so flags are synced regardless of email age.
+  - Notes: Exchange/OWA follow-up flags are not exposed via IMAP \Flagged and remain undetectable via IMAP.
+
+- [x] Fix unknown-8bit charset decoding error
+  - Category: Bug / Sync
+  - Clarification: Some mail clients send `unknown-8bit` as the charset, which Python's codec doesn't recognise. Now normalised to `latin-1`.
+  - Notes: Also handles `unknown`, `x-unknown`, and `x-user-defined`.
+
+- [x] Immediate loading indicator when changing email filters
+  - Category: Bug / UX
+  - Clarification: Selecting a filter (flagged, unread, etc.) showed no feedback until the fetch completed. Now clears the list and shows "Loading…" instantly.
+  - Notes: Status bar also shows busy state during load.
+
+- [x] Dev hot-reload via LOCALUPDATE file
+  - Category: Developer / Tooling
+  - Clarification: Creating a LOCALUPDATE file in the project root triggers a server restart and browser reload. Claude Code hook creates this file automatically after every file edit.
+  - Notes: Dev-only (skipped in packaged .app). Uses subprocess.Popen + os._exit to avoid inheriting the Flask socket on restart.
+
 ### M
 
 - [ ] Add detailed logging for inbox sync problems
@@ -46,7 +66,7 @@ Effort scale:
   - Clarification: Add a debug mode in settings that logs folder selection, UIDVALIDITY, UID ranges, fetched counts, removed counts, and IMAP errors.
   - Notes: Useful for diagnosing remote/local sync problems.
 
-- [ ] Allow full mailbox resynchronization
+- [x] Allow full mailbox resynchronization
   - Category: Bug / Recovery
   - Clarification: Add a safe per-account or per-folder action to reset sync state and re-fetch mail.
   - Notes: Must protect local-only states such as Finished and knowledge metadata from accidental loss.
@@ -55,12 +75,12 @@ Effort scale:
 
 ### M-L
 
-- [x] Harden protection against email exploits
+- [ ] Harden protection against email exploits
   - Category: Security
   - Clarification: Strengthen HTML sanitizing, block remote tracking images, remove scripts/styles/event handlers, ensure links open externally, and consider a plain-text mode.
   - Notes: Critical before sharing the app more broadly.
 
-- [x] Harden prompts against prompt injection and jailbreaks from email content
+- [ ] Harden prompts against prompt injection and jailbreaks from email content
   - Category: Security / LLM
   - Clarification: Mark email content as untrusted, isolate system instructions from email text, and explicitly instruct the LLM not to follow instructions found inside emails.
   - Notes: Cannot be perfect, but can materially reduce risk.
@@ -91,7 +111,7 @@ Effort scale:
   - Clarification: Add a bulk action for the current folder/filter with a confirmation that shows the number of affected emails.
   - Notes: Implemented as a current folder/filter bulk action. Remains local-only and does not mutate remote IMAP. Also added per-email Spam/Junk actions in the list view.
 
-- [x] Add theme setting for system dark/light mode
+- [ ] Add theme setting for system dark/light mode
   - Category: Feature / UX
   - Clarification: Add a theme option such as `System`, `Light`, and `Dark`; when `System` is selected, detect `prefers-color-scheme` and update automatically when macOS changes appearance.
   - Notes: Current manual toggle can remain, but should respect the selected theme mode.

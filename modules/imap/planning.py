@@ -27,3 +27,11 @@ def search_recent_uids(conn, days: int = 7) -> list[bytes]:
         return []
     return data[0].split()
 
+
+def search_flagged_uids(conn) -> list[bytes]:
+    """Return all UIDs currently carrying the \\Flagged flag, regardless of age."""
+    status, data = conn.uid("search", None, "FLAGGED")
+    if status != "OK" or not data:
+        return []
+    return data[0].split()
+
