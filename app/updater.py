@@ -220,14 +220,29 @@ def download_and_install(dmg_url: str, app_path: str | None = None, progress_cb=
         raise
     if progress_cb:
         progress_cb("Installing update...")
+    log_path = "/tmp/ea_update.log"
     shell_script = f'''#!/bin/bash
+exec > "{log_path}" 2>&1
+set -x
+echo "[updater] script started at $(date)"
 sleep 2
-hdiutil attach "{dmg_path}" -quiet -nobrowse -mountpoint /tmp/ea_mount
+echo "[updater] attaching DMG: {dmg_path}"
+hdiutil attach "{dmg_path}" -nobrowse -mountpoint /tmp/ea_mount
+echo "[updater] hdiutil exit: $?"
+echo "[updater] DMG contents:"
+ls /tmp/ea_mount/
+echo "[updater] target app path: {target_path}"
+echo "[updater] removing old app"
 rm -rf "{target_path}"
+echo "[updater] rm exit: $?"
+echo "[updater] copying new app"
 ditto "/tmp/ea_mount/Email Assistant.app" "{target_path}"
+echo "[updater] ditto exit: $?"
 xattr -dr com.apple.quarantine "{target_path}"
-hdiutil detach /tmp/ea_mount -quiet
+hdiutil detach /tmp/ea_mount
+echo "[updater] launching app"
 open "{target_path}"
+echo "[updater] done"
 rm -- "$0"
 '''
     with open(script_path, "w") as f:
@@ -235,5 +250,5 @@ rm -- "$0"
     os.chmod(script_path, 0o755)
     if progress_cb:
         progress_cb("Launching installer...")
-    subprocess.Popen(["bash", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(["bash", script_path])
     os._exit(0)
