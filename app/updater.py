@@ -236,4 +236,4 @@ rm -- "$0"
     if progress_cb:
         progress_cb("Launching installer...")
     subprocess.Popen(["bash", script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    sys.exit()
+    os._exit(0)
