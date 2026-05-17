@@ -1,5 +1,6 @@
 import os
 import plistlib
+import ssl
 import sys
 import threading
 import time
@@ -8,6 +9,14 @@ import urllib.error
 import json
 import subprocess
 import logging
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 logger = logging.getLogger(__name__)
 
@@ -70,16 +79,19 @@ def get_current_version() -> str:
     for info_plist_path in _candidate_info_plists():
         version = _read_info_plist_version(info_plist_path)
         if version:
+            print(f"[updater] version from plist {info_plist_path!r}: {version!r}", flush=True)
             return version
     version = _bundle_version_from_foundation()
     if version:
+        print(f"[updater] version from NSBundle: {version!r}", flush=True)
         return version
     try:
         from version import __version__
-
+        print(f"[updater] version from version.py: {__version__!r}", flush=True)
         return str(__version__)
     except Exception:
         pass
+    print("[updater] version: fallback to 'dev'", flush=True)
     return "dev"
 
 
@@ -107,29 +119,40 @@ def _check_for_update():
     global _state
     try:
         current = get_current_version()
+        print(f"[updater] current version: {current!r}", flush=True)
+        print(f"[updater] app path: {get_app_path()!r}", flush=True)
+        print(f"[updater] Info.plist candidates: {_candidate_info_plists()}", flush=True)
         url = f"https://api.github.com/repos/{_REPO_OWNER}/{_REPO_NAME}/releases/latest"
         req = urllib.request.Request(url, headers={"User-Agent": "EmailAssistant"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, context=_ssl_context(), timeout=30) as resp:
             data = json.loads(resp.read().decode())
         latest_tag = data.get("tag_name", "")
         latest_version = latest_tag.lstrip("v")
+        print(f"[updater] latest release tag: {latest_tag!r} → version: {latest_version!r}", flush=True)
         dmg_url = None
         for asset in data.get("assets", []):
             if asset.get("name") == _DMG_ASSET_NAME:
                 dmg_url = asset.get("browser_download_url")
                 break
+        print(f"[updater] DMG asset URL: {dmg_url!r}", flush=True)
         if not dmg_url:
             msg = f"No {_DMG_ASSET_NAME} asset found in release {latest_tag or '(unknown)'}"
+            print(f"[updater] WARNING: {msg}", flush=True)
             logger.warning(msg)
             _state = {"available": False, "error": msg}
             return
-        if _version_gt(latest_version, current):
+        update_available = _version_gt(latest_version, current)
+        print(f"[updater] version_gt({latest_version!r}, {current!r}) = {update_available}", flush=True)
+        if update_available:
             _state = {"available": True, "version": latest_version, "dmg_url": dmg_url, "error": None}
+            print(f"[updater] UPDATE AVAILABLE: {latest_version}", flush=True)
             logger.info("Update available: %s (current: %s)", latest_version, current)
         else:
             _state = {"available": False, "error": None}
+            print(f"[updater] No update. Latest: {latest_version}, current: {current}", flush=True)
             logger.info("No update available. Latest: %s, current: %s", latest_version, current)
     except Exception as exc:
+        print(f"[updater] ERROR: {exc}", flush=True)
         logger.error("Update check failed: %s", exc)
         _state = {"available": False, "error": str(exc)}
 
@@ -178,7 +201,7 @@ def download_and_install(dmg_url: str, app_path: str | None = None, progress_cb=
         progress_cb("Downloading update...")
     try:
         req = urllib.request.Request(dmg_url, headers={"User-Agent": "EmailAssistant"})
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, context=_ssl_context(), timeout=300) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
             with open(dmg_path, "wb") as out:
