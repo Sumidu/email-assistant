@@ -33,6 +33,6 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Build a test DMG with a bumped version tag and confirm the modal appears and the swap completes successfully
-- [ ] 6.2 Confirm modal cannot be dismissed (no keyboard shortcut, no click-outside)
+- [x] 6.1 Build a test DMG with a bumped version tag and confirm the modal appears and the swap completes successfully
+- [x] 6.2 Confirm modal cannot be dismissed (no keyboard shortcut, no click-outside)
 - [ ] 6.3 Confirm dev mode (`python main.py`) shows no update modal and makes no GitHub API calls
