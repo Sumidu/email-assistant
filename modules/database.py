@@ -1064,3 +1064,41 @@ def init_triage_sync() -> None:
     if cloud_changed:
         data["done"] = cloud_done
         triage_store.save_raw(data)
+
+
+def get_unextracted_emails() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT e.* FROM emails e
+           LEFT JOIN entity_extraction_log l ON l.email_id = e.id
+           WHERE l.email_id IS NULL
+           ORDER BY COALESCE(e.date_ts, strftime('%s', e.fetched_at), 0) DESC"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_entity_extracted(ids: list[str]) -> None:
+    if not ids:
+        return
+    ts = datetime.now().isoformat()
+
+    def work(conn):
+        conn.executemany(
+            "INSERT OR IGNORE INTO entity_extraction_log (email_id, extracted_at) VALUES (?, ?)",
+            [(eid, ts) for eid in ids],
+        )
+
+    _with_write_retry(work)
+
+
+def get_calendar_events_in_window(start_ts: float, end_ts: float) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT * FROM calendar_events
+           WHERE start_ts <= ? AND end_ts >= ?
+           ORDER BY start_ts ASC""",
+        (end_ts, start_ts),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

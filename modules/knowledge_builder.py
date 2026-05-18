@@ -18,6 +18,7 @@ from app import prompt_defaults
 
 from . import database
 from . import llm_logger
+from modules.knowledge import entity_files as kb_entity_files
 from modules.knowledge import frontmatter as kb_frontmatter
 from modules.knowledge import matching as kb_matching
 
@@ -27,6 +28,9 @@ METADATA_PATH = os.path.join(KNOWLEDGE_DIR, "_metadata.json")
 FRONTMATTER_MARKER = kb_frontmatter.FRONTMATTER_MARKER
 PEOPLE_DIR_NAME = "People"
 OTHER_DIR_NAME = "Other"
+PROJECTS_DIR_NAME = "Projects"
+COMMITMENTS_DIR_NAME = "Commitments"
+MEETINGS_DIR_NAME = "Meetings"
 
 
 def _set_knowledge_dir(path) -> None:
@@ -47,11 +51,21 @@ class KnowledgeBuilder:
     def _ensure_knowledge_dirs(self) -> None:
         os.makedirs(os.path.join(KNOWLEDGE_DIR, PEOPLE_DIR_NAME), exist_ok=True)
         os.makedirs(os.path.join(KNOWLEDGE_DIR, OTHER_DIR_NAME), exist_ok=True)
+        os.makedirs(os.path.join(KNOWLEDGE_DIR, PROJECTS_DIR_NAME), exist_ok=True)
+        os.makedirs(os.path.join(KNOWLEDGE_DIR, COMMITMENTS_DIR_NAME), exist_ok=True)
+        os.makedirs(os.path.join(KNOWLEDGE_DIR, MEETINGS_DIR_NAME), exist_ok=True)
 
     @staticmethod
     def _knowledge_category(filename: str, metadata: dict | None = None, content: str = "") -> str:
         metadata = metadata or {}
         fname = os.path.basename(filename)
+        entity_type = metadata.get("type", "")
+        if entity_type == "project":
+            return PROJECTS_DIR_NAME
+        if entity_type == "commitment":
+            return COMMITMENTS_DIR_NAME
+        if entity_type == "meeting":
+            return MEETINGS_DIR_NAME
         email_value = metadata.get("email") or KnowledgeBuilder._infer_email_from_filename(fname)
         aliases = metadata.get("aliases") if isinstance(metadata.get("aliases"), list) else []
         source = metadata.get("source", "")
@@ -61,13 +75,21 @@ class KnowledgeBuilder:
             return OTHER_DIR_NAME
         if content:
             frontmatter, _ = KnowledgeBuilder._split_frontmatter(content)
-            if frontmatter.get("type") == "contact" or frontmatter.get("email"):
+            t = frontmatter.get("type", "")
+            if t == "project":
+                return PROJECTS_DIR_NAME
+            if t == "commitment":
+                return COMMITMENTS_DIR_NAME
+            if t == "meeting":
+                return MEETINGS_DIR_NAME
+            if t == "contact" or frontmatter.get("email"):
                 return PEOPLE_DIR_NAME
         return OTHER_DIR_NAME
 
     def _knowledge_path(self, filename: str, category: str | None = None) -> str:
         fname = os.path.basename(filename)
-        categories = [category] if category else ["", PEOPLE_DIR_NAME, OTHER_DIR_NAME]
+        all_cats = ["", PEOPLE_DIR_NAME, OTHER_DIR_NAME, PROJECTS_DIR_NAME, COMMITMENTS_DIR_NAME, MEETINGS_DIR_NAME]
+        categories = [category] if category else all_cats
         for cat in categories:
             fpath = os.path.join(KNOWLEDGE_DIR, cat, fname) if cat else os.path.join(KNOWLEDGE_DIR, fname)
             if os.path.exists(fpath):
@@ -78,7 +100,8 @@ class KnowledgeBuilder:
     def _knowledge_files(self) -> list[str]:
         files = []
         seen = set()
-        for cat in ("", PEOPLE_DIR_NAME, OTHER_DIR_NAME):
+        all_dirs = ("", PEOPLE_DIR_NAME, OTHER_DIR_NAME, PROJECTS_DIR_NAME, COMMITMENTS_DIR_NAME, MEETINGS_DIR_NAME)
+        for cat in all_dirs:
             directory = os.path.join(KNOWLEDGE_DIR, cat) if cat else KNOWLEDGE_DIR
             if not os.path.isdir(directory):
                 continue
@@ -940,6 +963,91 @@ class KnowledgeBuilder:
 
     # ---- main entry point --------------------------------------------------
 
+    def build_entities(self, emails: list, progress_callback=None) -> dict:
+        from modules.knowledge import entities as kb_entities
+
+        if not emails:
+            return {"success": True, "skipped": True, "message": "No unextracted emails."}
+
+        MAX_PER_BUILD = 200
+        emails = emails[:MAX_PER_BUILD]
+        if progress_callback:
+            progress_callback(f"Extracting entities from {len(emails)} email(s)…")
+
+        extractions: list[dict] = []
+        extracted_ids: list[str] = []
+        for email in emails:
+            result = kb_entities.extract_entities_from_email(email, self.config)
+            if result:
+                extractions.append(result)
+            database.mark_entity_extracted([email["id"]])
+            extracted_ids.append(email["id"])
+
+        if not extractions:
+            return {"success": True, "extracted": 0, "entities": 0}
+
+        if progress_callback:
+            progress_callback("Canonicalizing extracted entities…")
+
+        batch = kb_entities.aggregate_entity_batch(extractions)
+        existing_slugs = {
+            "projects": kb_entity_files.collect_existing_slugs(
+                os.path.join(KNOWLEDGE_DIR, PROJECTS_DIR_NAME)
+            ),
+            "commitments": kb_entity_files.collect_existing_slugs(
+                os.path.join(KNOWLEDGE_DIR, COMMITMENTS_DIR_NAME)
+            ),
+            "meetings": kb_entity_files.collect_existing_slugs(
+                os.path.join(KNOWLEDGE_DIR, MEETINGS_DIR_NAME)
+            ),
+        }
+        canon_map = kb_entities.canonicalize_entities(batch, existing_slugs, self.config)
+
+        entity_count = 0
+        for project in batch.get("projects", []):
+            code_slug = project.get("_slug", "")
+            canon_slug = canon_map.get("projects", {}).get(code_slug, code_slug)
+            people = [f"[[{p}]]" for p in (project.get("people") or [])]
+            obs = [f"{datetime.now():%Y-%m-%d}: {project.get('context', '')}"]
+            try:
+                self.write_project_file(canon_slug, project.get("name", canon_slug), obs, people)
+                entity_count += 1
+            except Exception:
+                pass
+
+        for commitment in batch.get("commitments", []):
+            code_slug = commitment.get("_slug", "")
+            canon_slug = canon_map.get("commitments", {}).get(code_slug, code_slug)
+            obs = [f"{datetime.now():%Y-%m-%d}: {commitment.get('what', '')}"]
+            try:
+                self.write_commitment_file(canon_slug, commitment, obs)
+                entity_count += 1
+            except Exception:
+                pass
+
+        for meeting in batch.get("meetings", []):
+            code_slug = meeting.get("_slug", "")
+            canon_slug = canon_map.get("meetings", {}).get(code_slug, code_slug)
+            date = meeting.get("date", "")
+            topic = meeting.get("topic", "")
+            participants = meeting.get("participants") or []
+            obs = [f"{datetime.now():%Y-%m-%d}: {meeting.get('notes', '')}"]
+            calendar_link = kb_entities.find_calendar_match(date, topic)
+            try:
+                self.write_meeting_file(canon_slug, date, topic, participants, obs, calendar_link)
+                entity_count += 1
+            except Exception:
+                pass
+
+        if entity_count and progress_callback:
+            progress_callback(f"Wrote {entity_count} entity file(s) from {len(extracted_ids)} email(s).")
+
+        return {
+            "success": True,
+            "extracted": len(extracted_ids),
+            "entities": entity_count,
+        }
+
     def build(self, progress_callback=None) -> dict:
         new_emails = database.get_unprocessed_kb_emails()
         if not new_emails:
@@ -1016,12 +1124,17 @@ class KnowledgeBuilder:
 
         database.mark_emails_kb_processed(processed_ids)
 
+        # Pass 2: entity extraction
+        unextracted = database.get_unextracted_emails()
+        entities_result = self.build_entities(unextracted, progress_callback)
+
         return {
             "success": True,
             "style": style_result,
             "contacts": contact_results,
             "total_contacts": len(contact_results),
             "new_emails_processed": len(new_emails),
+            "entities": entities_result,
         }
 
     # ---- pin management ----------------------------------------------------
@@ -1325,3 +1438,106 @@ class KnowledgeBuilder:
             self.set_pinned(pinned)
         self._save_metadata(metadata)
         return {"success": True, "deleted": deleted, "count": len(deleted)}
+
+    # ---- entity file writers (Pass 2) ---------------------------------------
+
+    def _rewrite_ai_block(self, entity_type: str, existing_block: str, observations: list[str]) -> str:
+        prompts = prompt_defaults.ensure_prompts(self.config)
+        system = prompts.get("entity_ai_block_system", "")
+        user_tpl = prompts.get("entity_ai_block_user", "")
+        obs_text = "\n".join(f"- {o}" for o in observations[:15])
+        user = prompt_defaults.render_prompt(user_tpl, {
+            "entity_type": entity_type,
+            "existing_block": existing_block or "(none)",
+            "new_observations": obs_text or "(none)",
+        })
+        return self._call_llm(system, user, max_tokens=800)
+
+    def write_project_file(self, slug: str, name: str, observations: list[str], people_links: list[str]) -> str:
+        fname = self._safe_filename(name) + ".md"
+        path = os.path.join(KNOWLEDGE_DIR, PROJECTS_DIR_NAME, fname)
+        parsed = kb_entity_files.read_entity_file(path)
+        new_block = self._rewrite_ai_block("project", parsed["ai_block"], observations)
+        fm = parsed["frontmatter"] or {}
+        fm.update({
+            "type": "project",
+            "slug": slug,
+            "name": name,
+            "status": fm.get("status", "active"),
+            "last_ai_update": datetime.now().strftime("%Y-%m-%d"),
+        })
+        if people_links:
+            fm["people"] = people_links
+        user_content = parsed["user_content"] or "## Links\n\n## Notes\n"
+        kb_entity_files.write_entity_file(path, fm, new_block, user_content)
+        return path
+
+    def write_commitment_file(self, slug: str, data: dict, observations: list[str]) -> str:
+        safe_name = re.sub(r"[^\w\s-]", "", slug)[:60].strip()
+        fname = safe_name + ".md"
+        path = os.path.join(KNOWLEDGE_DIR, COMMITMENTS_DIR_NAME, fname)
+        parsed = kb_entity_files.read_entity_file(path)
+        new_block = self._rewrite_ai_block("commitment", parsed["ai_block"], observations)
+        fm = parsed["frontmatter"] or {}
+        fm.update({
+            "type": "commitment",
+            "slug": slug,
+            "direction": data.get("direction", "outgoing"),
+            "status": fm.get("status", "pending"),
+            "last_ai_update": datetime.now().strftime("%Y-%m-%d"),
+        })
+        if data.get("person"):
+            fm["people"] = [f"[[{data['person']}]]"]
+        if data.get("deadline"):
+            fm["deadline"] = data["deadline"]
+        if data.get("certainty"):
+            fm["certainty"] = data["certainty"]
+        if data.get("project"):
+            fm["project"] = f"[[{data['project']}]]"
+        user_content = parsed["user_content"] or "## Notes\n"
+        kb_entity_files.write_entity_file(path, fm, new_block, user_content)
+        return path
+
+    def write_meeting_file(self, slug: str, date: str, topic: str, participants: list[str],
+                           observations: list[str], calendar_link: str | None = None) -> str:
+        if date and len(date) >= 10:
+            date_part = date[:10]
+            topic_safe = re.sub(r"[^\w\s-]", "", topic or "Meeting")[:50].strip()
+            if topic_safe:
+                fname = f"{date_part} {topic_safe}.md"
+            elif participants:
+                fname = f"{date_part} Meeting with {participants[0]}.md"
+            else:
+                fname = f"{date_part} Meeting.md"
+        elif topic:
+            topic_safe = re.sub(r"[^\w\s-]", "", topic)[:50].strip()
+            p_str = " ".join(participants[:2]) if participants else ""
+            fname = f"Meeting - {topic_safe}{' - ' + p_str if p_str else ''}.md"
+        else:
+            fname = f"Meeting - {slug}.md"
+
+        path = os.path.join(KNOWLEDGE_DIR, MEETINGS_DIR_NAME, fname)
+        parsed = kb_entity_files.read_entity_file(path)
+        new_block = self._rewrite_ai_block("meeting", parsed["ai_block"], observations)
+        fm = parsed["frontmatter"] or {}
+        fm.update({
+            "type": "meeting",
+            "slug": slug,
+            "topic": topic or "",
+            "last_ai_update": datetime.now().strftime("%Y-%m-%d"),
+        })
+        if date:
+            fm["date"] = date[:10]
+        if participants:
+            fm["participants"] = [f"[[{p}]]" for p in participants]
+        if calendar_link:
+            fm["calendar_event"] = f"[[{calendar_link}]]"
+
+        links_section = "## Links\n"
+        if participants:
+            links_section += " · ".join(f"[[{p}]]" for p in participants) + "\n"
+        if calendar_link:
+            links_section += f"\n[[{calendar_link}]]\n"
+        user_content = parsed["user_content"] or f"{links_section}\n## Notes\n"
+        kb_entity_files.write_entity_file(path, fm, new_block, user_content)
+        return path

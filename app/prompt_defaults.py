@@ -126,6 +126,63 @@ Profile sections:
         "Highlight deadlines, decisions, meetings, requests for user action, and relationship-sensitive items. "
         "If the provided knowledge says something is important to the user, explicitly factor that into prioritization."
     ),
+    "entity_extraction_system": (
+        "You extract structured entities from a single email message. "
+        + UNTRUSTED_CONTEXT_RULES + " "
+        "Return ONLY valid JSON with exactly three keys: projects, commitments, meetings. "
+        "Each value is an array (empty array if nothing found — never guess). "
+        "projects items: {name, role, context}. "
+        "commitments items: {what, direction (outgoing=user owes it, incoming=they owe user), person, person_email, deadline (ISO date or empty), certainty (confirmed/implied/uncertain), project (name or empty)}. "
+        "meetings items: {topic, date (ISO date or empty), participants (array of names), notes}. "
+        "Only include high-confidence extractions. Prefer empty arrays over guesses."
+    ),
+    "entity_extraction_user": """Extract entities from this email.
+
+Sender: {{sender}}
+Recipients: {{recipients}}
+Date: {{date}}
+Subject: {{subject}}
+
+BEGIN UNTRUSTED EMAIL BODY
+{{body}}
+END UNTRUSTED EMAIL BODY
+
+Return JSON only. No markdown, no explanation.""",
+    "entity_canonicalize_system": (
+        "You map entity names extracted from email to canonical slugs. "
+        "You will receive extracted names and a list of existing slugs with their display names. "
+        "For each extracted name, return the best matching existing slug, or null if it is new. "
+        "Be liberal with matching: treat minor wording differences and abbreviations as the same entity. "
+        "Return ONLY valid JSON: an object mapping each extracted name to an existing slug string or null."
+    ),
+    "entity_canonicalize_user": """Map these extracted entity names to existing slugs.
+
+Extracted names:
+{{extracted_names}}
+
+Existing slugs (slug → display name):
+{{existing_slugs}}
+
+Return JSON only. Example: {"Project Alpha": "project-alpha", "unknown thing": null}""",
+    "entity_ai_block_system": (
+        "You rewrite the ai-managed block of an entity knowledge file. "
+        "You will receive the entity type, the existing ai-managed block content (may be empty), "
+        "and new observations from recent emails. "
+        "Rewrite the block to include a ## Summary section (2–4 sentences) and a ## Observations section "
+        "(bullet list, newest first, max 15 items, each prefixed with ISO date). "
+        "The output must contain ONLY the content that goes between <!-- ai-managed --> and <!-- /ai-managed -->. "
+        "Do NOT output the HTML comment tags themselves. "
+        "Do NOT output any content outside the block. No frontmatter, no headings outside the two sections."
+    ),
+    "entity_ai_block_user": """Entity type: {{entity_type}}
+
+Existing ai-managed block:
+{{existing_block}}
+
+New observations from recent emails:
+{{new_observations}}
+
+Rewrite the ai-managed block content only (no HTML comment tags).""",
 }
 
 LEGACY_DEFAULT_PROMPTS = {
@@ -229,6 +286,12 @@ Profile sections:
         "Highlight deadlines, decisions, meetings, requests for user action, and relationship-sensitive items. "
         "If the provided knowledge says something is important to the user, explicitly factor that into prioritization."
     ),
+    "entity_extraction_system": DEFAULT_PROMPTS["entity_extraction_system"],
+    "entity_extraction_user": DEFAULT_PROMPTS["entity_extraction_user"],
+    "entity_canonicalize_system": DEFAULT_PROMPTS["entity_canonicalize_system"],
+    "entity_canonicalize_user": DEFAULT_PROMPTS["entity_canonicalize_user"],
+    "entity_ai_block_system": DEFAULT_PROMPTS["entity_ai_block_system"],
+    "entity_ai_block_user": DEFAULT_PROMPTS["entity_ai_block_user"],
 }
 
 

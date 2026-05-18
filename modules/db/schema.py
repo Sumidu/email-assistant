@@ -76,6 +76,10 @@ BASE_SCHEMA_SQL = """
         action      TEXT NOT NULL,
         created_at  TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS entity_extraction_log (
+        email_id     TEXT PRIMARY KEY REFERENCES emails(id),
+        extracted_at TEXT NOT NULL
+    );
 """
 
 INDEX_SQL = """
