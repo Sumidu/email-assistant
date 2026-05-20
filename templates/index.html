@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MAIL — Local Email Assistant</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='activity-console-20260511') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='layout-20260520') }}">
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
@@ -14,21 +14,22 @@
     <div id="search-wrap"><span class="ico">&#128269;</span><input id="search-input" type="text" placeholder="Search subject / sender…" autocomplete="off"/></div>
     <div id="header-actions">
       <button class="hbtn accent" id="btn-sync" title="Fetch new mail from configured folders">&#8635; Sync</button>
-      <button class="hbtn summary-action" id="btn-mail-summary">&#9776; Mail Summary</button>
-      <div id="todo-finder-wrap">
-        <button class="hbtn todo-action" id="btn-find-todos">&#9745; Todos</button>
+      <span class="h-sep" aria-hidden="true"></span>
+      <div class="hpop-wrap" id="kb-menu-wrap">
+        <button class="hbtn kb-action" id="btn-kb-menu" title="Knowledge base">&#9670; KB &#9663;</button>
+        <div class="hpop" id="kb-submenu" role="menu">
+          <button class="hpop-item kb-action" id="btn-build-kb" role="menuitem">&#9670; Update knowledge base</button>
+          <button class="hpop-item" id="btn-view-kb" role="menuitem">&#128196; View KB files</button>
+        </div>
       </div>
-      <button class="hbtn calendar-action" id="btn-calendar">&#128197; Calendar</button>
-      <button class="hbtn kb-action" id="btn-build-kb">&#9670; Update Knowledge Base</button>
-      <button class="hbtn kb-action" id="btn-view-kb">&#128196; View KB</button>
-      <button id="btn-settings" title="Settings">&#9881;</button>
-      <button id="theme-toggle" title="Toggle light/dark">&#9790;</button>
+      <button class="hbtn" id="btn-palette" title="Commands &#8984;K">&#8984;K</button>
+      <button class="hbtn icon-btn" id="btn-settings" title="Settings">&#9881;</button>
     </div>
   </header>
 
   <nav id="folders">
     <div id="folders-header"><span>&#128193;</span><span>Folders</span><button id="folders-collapse" title="Collapse folders">&#8249;</button></div>
-    <div id="folder-list"><div style="color:var(--dim);padding:14px;font-size:10px;text-align:center;line-height:1.8;">Add an account in Settings.</div></div>
+    <div id="folder-list"><div class="es"><span class="es-ico">⚙</span><div class="es-msg">No accounts configured</div><button class="es-act es-open-settings">Open Settings</button></div></div>
   </nav>
   <button id="folders-rail" title="Show folders">&#128193;</button>
 
@@ -53,7 +54,7 @@
       </select>
       <button id="btn-finish-filtered" title="Mark all emails in the current folder/filter as done">&#10003;</button>
     </div>
-    <div id="email-list"><div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Select a folder.</div></div>
+    <div id="email-list"><div class="es"><span class="es-ico">⊘</span><div class="es-msg">Select a folder to view mail</div></div></div>
     <div id="load-more" style="display:none;">&#8227; Load more…</div>
     <div id="maillist-resizer" title="Resize mail list"></div>
   </section>
@@ -73,7 +74,7 @@
             <button class="rbtn primary finish-action icon-action" id="btn-mark-done" style="display:none;" title="Done">&#10003;</button>
           </div>
         </div>
-        <div id="email-body" class="placeholder">Select a message</div>
+        <div id="email-body" class="placeholder"><span class="es-ico">⊘</span><span>Select a message</span></div>
       </div>
       <div id="row-resizer" title="Resize email preview and AI area"></div>
 
@@ -86,7 +87,7 @@
             <button class="rbtn" id="btn-add-ctx" title="Add knowledge context">+ Context</button>
           </div>
           <div id="kb-tags"></div>
-          <div id="response-text" class="placeholder">Click Generate or chat on the right</div>
+          <div id="response-text" class="placeholder"><span class="es-ico">◈</span><span>Generate a reply or use the chat</span></div>
           <div id="draft-actions">
             <button class="rbtn primary copy-strong icon-action" id="btn-copy" title="Copy">&#10697;</button>
             <button class="rbtn primary copy-done-action" id="btn-copy-done" title="Copy draft and mark email as done">&#10697; + &#10003;</button>
@@ -607,6 +608,40 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/app.js', v='activity-console-20260511') }}"></script>
+<div id="cmd-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+  <div id="cmd-panel">
+    <div id="cmd-search-row">
+      <kbd class="cmd-kbd">&#8984;K</kbd>
+      <input id="cmd-search" type="text" placeholder="Search commands…" autocomplete="off" spellcheck="false">
+      <kbd class="cmd-kbd">ESC</kbd>
+    </div>
+    <div id="cmd-list">
+      <button class="cmd-item summary-item" id="btn-mail-summary">
+        <span class="cmd-ico ci-summary">&#9776;</span>
+        <span class="cmd-label">Mail Summary</span>
+        <span class="cmd-desc">LLM digest of recent mail</span>
+      </button>
+      <div id="todo-finder-wrap">
+        <button class="cmd-item" id="btn-find-todos">
+          <span class="cmd-ico ci-todo">&#9745;</span>
+          <span class="cmd-label">Find Todos</span>
+          <span class="cmd-desc">Scan emails for action items</span>
+        </button>
+      </div>
+      <button class="cmd-item" id="btn-calendar">
+        <span class="cmd-ico ci-cal">&#128197;</span>
+        <span class="cmd-label">Calendar</span>
+        <span class="cmd-desc">Week view</span>
+      </button>
+      <button class="cmd-item" id="theme-toggle" title="Toggle light/dark">
+        <span class="cmd-ico">&#9790;</span>
+        <span class="cmd-label">Toggle theme</span>
+        <span class="cmd-desc">Cycle light / dark / system</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/app.js', v='layout-20260520') }}"></script>
 </body>
 </html>

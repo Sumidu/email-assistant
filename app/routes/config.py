@@ -8,7 +8,6 @@ import requests
 from app import config_store
 from app import llm_providers
 from app import paths
-from app import prompt_defaults
 from app import quick_templates
 from app import runtime as rt
 from modules import keychain_store
@@ -19,7 +18,6 @@ bp = Blueprint("config", __name__, url_prefix="/api")
 
 @bp.route("/config", methods=["GET"])
 def get_config():
-    prompt_defaults.ensure_prompts(rt.config)
     safe = {k: v for k, v in rt.config.items() if k != "accounts"}
     safe = json.loads(json.dumps(safe))
     if safe.get("lm_studio", {}).get("api_key"):
@@ -50,14 +48,6 @@ def save_config():
 
     if "default_llm_id" in data:
         rt.config["default_llm_id"] = data["default_llm_id"]
-
-    if "prompts" in data:
-        prompts = prompt_defaults.prompt_defaults()
-        incoming = data.get("prompts") or {}
-        for key in prompts:
-            if key in incoming:
-                prompts[key] = incoming[key]
-        rt.config["prompts"] = prompts
 
     if "quick_templates" in data:
         rt.config["quick_templates"] = quick_templates.normalize_quick_templates(
@@ -124,11 +114,6 @@ def import_portable_config():
         return jsonify({"success": True})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-
-
-@bp.route("/prompt_defaults", methods=["GET"])
-def get_prompt_defaults():
-    return jsonify(prompt_defaults.prompt_defaults())
 
 
 @bp.route("/quick_template_defaults", methods=["GET"])

@@ -26,10 +26,6 @@ def _email_preview(row: dict) -> dict:
     return todo_service.email_preview(row)
 
 
-def _json_candidates(text: str) -> list[str]:
-    return todo_service.json_candidates(text)
-
-
 def _parse_todos(raw: str) -> list[dict]:
     return todo_service.parse_todos(raw)
 
@@ -54,8 +50,8 @@ def _set_job(job_id: str, **updates) -> None:
 def _todo_worker(job_id: str, data: dict) -> None:
     found = _search_from_request(data)
     rows = found["rows"]
-    prompts = prompt_defaults.ensure_prompts(rt.config)
-    system_prompt = prompt_defaults.with_untrusted_context_rules(prompts["todo_extraction_system"])
+    prompts = prompt_defaults.load_prompts()
+    system_prompt = prompts["todo_extraction_system"]
     model = llm_providers.get_active_llm(rt.config).get("model", "")
     todos = []
     _set_job(job_id, status="running", matched=found["total"], total=len(rows), current=0, todos=[])

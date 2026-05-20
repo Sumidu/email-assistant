@@ -1,15 +1,13 @@
 import re
 from datetime import datetime
 
-import requests
 from flask import Blueprint, jsonify, request
 
-from app import llm_providers
+from app import llm_client
 from app import prompt_defaults
 from app import runtime as rt
 from app.services import mail_summary as mail_summary_service
 from modules import database
-from modules import llm_logger
 
 
 bp = Blueprint("mail_summary", __name__, url_prefix="/api")
@@ -122,8 +120,8 @@ def mail_summary():
             "analyzed": 0,
         })
 
-    prompts = prompt_defaults.ensure_prompts(rt.config)
-    system = prompt_defaults.with_untrusted_context_rules(prompts["mail_summary_system"])
+    prompts = prompt_defaults.load_prompts()
+    system = prompts["mail_summary_system"]
     knowledge = _summary_knowledge_context()
     email_text = "\n\n--- EMAIL ---\n\n".join(_compact_email(row) for row in rows)
     user_prompt = f"""Timeframe: {start_date} to {end_date}
@@ -139,31 +137,16 @@ BEGIN UNTRUSTED EMAIL COLLECTION
 END UNTRUSTED EMAIL COLLECTION
 """
 
-    lm = llm_providers.get_active_llm(rt.config)
-    model = lm.get("model", "local-model")
-    url = f"{lm['base_url']}/v1/chat/completions"
-    headers = {}
-    if lm.get("api_key"):
-        headers["Authorization"] = f"Bearer {lm['api_key']}"
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "max_tokens": 4000,
-        "temperature": 0.2,
-    }
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=180)
-        if resp.status_code == 400 and "response_format" in payload:
-            payload.pop("response_format", None)
-            resp = requests.post(url, json=payload, headers=headers, timeout=180)
-        resp.raise_for_status()
-        raw_summary = resp.json()["choices"][0]["message"]["content"]
-        llm_logger.log("mail_summary", system, user_prompt, raw_summary, model=model)
-        structured = _attach_valid_source_ids(_parse_summary_json(raw_summary), rows)
+        parsed = llm_client.call_json(
+            system, user_prompt, rt.config,
+            max_tokens=4000, tag="mail_summary", json_mode=True,
+        )
+        if not isinstance(parsed, dict):
+            parsed = {}
+        structured = _attach_valid_source_ids(
+            mail_summary_service.normalize_summary(parsed), rows
+        )
         return jsonify({
             "success": True,
             "summary": structured,

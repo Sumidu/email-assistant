@@ -368,9 +368,9 @@ function showProgress(lines,progressPct){
   progressDrawer.dataset.latest=lines[lines.length-1]||"Task running";
   progressLog.innerHTML=lines.map((l,i)=>`<div class="pl-line${i===lines.length-1?" latest":""}">${escHtml(l)}</div>`).join("");
   progressLog.scrollTop=progressLog.scrollHeight;
-  pdBar.style.width=progressPct+"%";
+  pdBar.style.transform="scaleX("+(progressPct/100)+")";
 }
-function hideProgress(){progressDrawer.classList.remove("open");pdBar.style.width="0%";}
+function hideProgress(){progressDrawer.classList.remove("open");pdBar.style.transform="scaleX(0)";}
 
 // ─── Task polling ─────────────────────────────────────────────────────────
 let totalExpected=0,taskPollTicks=0,kbLiveRefreshBusy=false;
@@ -433,7 +433,7 @@ async function loadFolders(){
     accountsCache=accounts;
     setupAutoSyncTimer();
     if(!accounts.length){
-      folderListEl.innerHTML='<div style="color:var(--dim);padding:14px;font-size:10px;text-align:center;line-height:1.8;">No accounts.<br>Open Settings to add one.</div>';
+      folderListEl.innerHTML='<div class="es"><span class="es-ico">⚙</span><div class="es-msg">No accounts configured</div><button class="es-act es-open-settings">Open Settings</button></div>';
       return;
     }
     const byAccount={};
@@ -520,7 +520,7 @@ function setupAutoSyncTimer(){
 // ─── Email list ───────────────────────────────────────────────────────────
 async function loadEmailList(append=false,{preserveSelection=false,clearMissingSelection=false}={}){
   if(!currentFolder)return;
-  if(!append){
+  if(!append && !allEmailsLocal.length){
     emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">Loading…</div>';
     setStatus("Loading…","busy");
   }
@@ -560,7 +560,7 @@ async function loadEmailList(append=false,{preserveSelection=false,clearMissingS
 
 function renderEmailList(emails,append=false){
   if(!append){
-    if(!emails.length){emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">No messages.</div>';return;}
+    if(!emails.length){emailListEl.innerHTML='<div class="es"><span class="es-ico">⊘</span><div class="es-msg">No messages in this folder</div></div>';return;}
     emailListEl.innerHTML="";
   }
   emails.forEach(e=>{
@@ -776,8 +776,8 @@ function clearCurrentEmailView(){
   emailFindTodosBtn.style.display="none";
   emailSubject.textContent="No message selected";emailSubject.style.color="var(--dim)";
   emailMeta.innerHTML="";
-  emailBody.textContent="Select a message";emailBody.className="placeholder";
-  responseText.textContent="Click Generate or chat on the right";responseText.className="placeholder";
+  emailBody.innerHTML='<span class="es-ico">⊘</span><span>Select a message</span>';emailBody.className="placeholder";
+  responseText.innerHTML='<span class="es-ico">◈</span><span>Generate a reply or use the chat</span>';responseText.className="placeholder";
   chatHistory=[];renderChatMessages();
   activeCtxFiles=new Set();renderCtxTags();
 }
@@ -804,7 +804,7 @@ function optimisticRemoveEmailFromList(emailId,nextId=null){
   const row=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(emailId)}"]`);
   if(row)row.remove();
   if(!emailListEl.querySelector(".email-item")){
-    emailListEl.innerHTML='<div style="color:var(--dim);padding:24px;text-align:center;font-size:10.5px;">No messages.</div>';
+    emailListEl.innerHTML='<div class="es"><span class="es-ico">⊘</span><div class="es-msg">No messages in this folder</div></div>';
   }
   if(nextId){
     const nextRow=emailListEl.querySelector(`.email-item[data-id="${CSS.escape(nextId)}"]`);
@@ -2860,7 +2860,7 @@ document.getElementById("btn-start-todo-llm").addEventListener("click",()=>start
 function updateTodoProgress(job){
   const total=job.total||0,current=job.current||0;
   document.getElementById("todo-progress-count").textContent=`${current} / ${total}`;
-  document.getElementById("todo-progress-fill").style.width=total?`${Math.round(current/total*100)}%`:"0%";
+  document.getElementById("todo-progress-fill").style.transform=total?`scaleX(${Math.round(current/total*100)/100})`:"scaleX(0)";
   const box=document.getElementById("todo-current-email");
   const mail=job.current_email;
   if(!mail){
@@ -3578,6 +3578,68 @@ checkForUpdate();
     }catch(_){}
   }
   setInterval(_devPing,2000);
+})();
+
+// ─── Empty state actions ───────────────────────────────────────────────────
+document.addEventListener("click",e=>{
+  if(e.target.classList.contains("es-open-settings"))document.getElementById("btn-settings").click();
+});
+
+// ─── Command palette ──────────────────────────────────────────────────────
+(function(){
+  const palette=document.getElementById("cmd-palette");
+  const searchEl=document.getElementById("cmd-search");
+  const list=document.getElementById("cmd-list");
+
+  function openPalette(){
+    palette.removeAttribute("hidden");
+    searchEl.value="";
+    filterItems("");
+    requestAnimationFrame(()=>searchEl.focus());
+  }
+  function closePalette(){palette.setAttribute("hidden","");}
+
+  function filterItems(q){
+    const lq=q.toLowerCase().trim();
+    list.querySelectorAll(".cmd-item").forEach(btn=>{
+      const show=!lq||(btn.textContent||"").toLowerCase().includes(lq);
+      const slot=btn.closest("#cmd-list > *");
+      if(slot)slot.style.display=show?"":"none";
+    });
+  }
+
+  document.getElementById("btn-palette").addEventListener("click",openPalette);
+
+  document.addEventListener("keydown",e=>{
+    if((e.metaKey||e.ctrlKey)&&e.key==="k"){
+      e.preventDefault();
+      palette.hasAttribute("hidden")?openPalette():closePalette();
+    }
+    if(e.key==="Escape"&&!palette.hasAttribute("hidden")){e.stopPropagation();closePalette();}
+  });
+
+  palette.addEventListener("click",e=>{if(e.target===palette)closePalette();});
+  searchEl.addEventListener("input",()=>filterItems(searchEl.value));
+
+  list.querySelectorAll(".cmd-item").forEach(btn=>{
+    btn.addEventListener("click",()=>setTimeout(closePalette,40));
+  });
+})();
+
+// ─── KB header submenu ─────────────────────────────────────────────────────
+(function(){
+  const wrap=document.getElementById("kb-menu-wrap");
+  const sub=document.getElementById("kb-submenu");
+  function closeMenu(){sub.classList.remove("open");}
+  document.getElementById("btn-kb-menu").addEventListener("click",e=>{
+    e.stopPropagation();
+    const opening=!sub.classList.contains("open");
+    sub.classList.toggle("open");
+    if(opening)document.addEventListener("click",closeMenu,{once:true});
+  });
+  sub.querySelectorAll(".hpop-item").forEach(btn=>{
+    btn.addEventListener("click",closeMenu);
+  });
 })();
 
 // ─── Init ─────────────────────────────────────────────────────────────────

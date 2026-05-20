@@ -10,8 +10,7 @@ import os
 import re
 from datetime import datetime
 
-import requests
-
+from app import llm_client
 from app import llm_providers
 from app import paths
 from app import prompt_defaults
@@ -140,32 +139,8 @@ class KnowledgeBuilder:
     # ---- LLM call ----------------------------------------------------------
 
     def _call_llm(self, system: str, user: str, max_tokens: int = 2000) -> str:
-        lm = llm_providers.get_active_llm(self.config)
-        self._last_llm = {
-            "id": lm.get("id", ""),
-            "name": lm.get("name", ""),
-            "model": lm.get("model", ""),
-            "base_url": lm.get("base_url", ""),
-        }
-        model = lm.get("model", "local-model")
-        url = f"{lm['base_url']}/v1/chat/completions"
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-            "max_tokens": max_tokens,
-            "temperature": 0.3,
-        }
-        headers = {}
-        if lm.get("api_key"):
-            headers["Authorization"] = f"Bearer {lm['api_key']}"
-        resp = requests.post(url, json=payload, headers=headers, timeout=180)
-        resp.raise_for_status()
-        response = resp.json()["choices"][0]["message"]["content"]
-        llm_logger.log("knowledge", system, user, response, model=model)
-        return response
+        self._last_llm = llm_client.active_lm_metadata(self.config)
+        return llm_client.call(system, user, self.config, max_tokens=max_tokens, tag="knowledge")
 
     def _current_llm_metadata(self, source: str) -> dict:
         lm = self._last_llm or llm_providers.get_active_llm(self.config)
@@ -865,8 +840,8 @@ class KnowledgeBuilder:
             for e in sample
         )
 
-        prompts = prompt_defaults.ensure_prompts(self.config)
-        system = prompt_defaults.with_untrusted_context_rules(prompts["knowledge_style_system"])
+        prompts = prompt_defaults.load_prompts()
+        system = prompts["knowledge_style_system"]
         user = prompt_defaults.render_prompt(
             prompts["knowledge_style_user"],
             {"snippets": snippets[:9000]},
@@ -905,8 +880,8 @@ class KnowledgeBuilder:
             else "No replies on record."
         )
 
-        prompts = prompt_defaults.ensure_prompts(self.config)
-        system = prompt_defaults.with_untrusted_context_rules(prompts["knowledge_contact_system"])
+        prompts = prompt_defaults.load_prompts()
+        system = prompts["knowledge_contact_system"]
         user = prompt_defaults.render_prompt(
             prompts["knowledge_contact_user"],
             {
@@ -1442,9 +1417,9 @@ class KnowledgeBuilder:
     # ---- entity file writers (Pass 2) ---------------------------------------
 
     def _rewrite_ai_block(self, entity_type: str, existing_block: str, observations: list[str]) -> str:
-        prompts = prompt_defaults.ensure_prompts(self.config)
-        system = prompts.get("entity_ai_block_system", "")
-        user_tpl = prompts.get("entity_ai_block_user", "")
+        prompts = prompt_defaults.load_prompts()
+        system = prompts["entity_ai_block_system"]
+        user_tpl = prompts["entity_ai_block_user"]
         obs_text = "\n".join(f"- {o}" for o in observations[:15])
         user = prompt_defaults.render_prompt(user_tpl, {
             "entity_type": entity_type,

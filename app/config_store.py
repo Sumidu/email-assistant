@@ -8,7 +8,6 @@ import sys
 from modules import keychain_store
 from app import llm_providers
 from app import paths
-from app import prompt_defaults
 from app import quick_templates
 
 
@@ -25,7 +24,6 @@ DEFAULT_CONFIG = {
     "llms": [llm_providers.default_provider()],
     "default_llm_id": "lm_studio",
     "app": {"port": 5100, "active_llm_id": "lm_studio", "theme_mode": "system", "thread_order": "newest_first"},
-    "prompts": prompt_defaults.prompt_defaults(),
     "quick_templates": quick_templates.quick_template_defaults(),
 }
 
@@ -266,7 +264,6 @@ def migrate_config(config: dict) -> dict:
         imap.setdefault("body_storage", "text_html")
         apply_account_detection(account)
     llm_providers.ensure_llm_config(config)
-    prompt_defaults.ensure_prompts(config)
     quick_templates.ensure_quick_templates(config)
     app = config.setdefault("app", {})
     theme_mode = str(app.get("theme_mode") or "system").lower()

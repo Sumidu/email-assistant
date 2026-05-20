@@ -3,6 +3,8 @@ import re
 import uuid
 from datetime import UTC, datetime
 
+from app.llm_client import _extract_json
+
 
 def compact_email(row: dict) -> str:
     body = re.sub(r"\s+", " ", row.get("body_text") or "").strip()
@@ -28,49 +30,8 @@ def email_preview(row: dict) -> dict:
     }
 
 
-def json_candidates(text: str) -> list[str]:
-    candidates = []
-    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE):
-        candidates.append(match.group(1).strip())
-    starts = [idx for idx, char in enumerate(text) if char in "[{"]
-    for start in starts:
-        opening = text[start]
-        closing = "]" if opening == "[" else "}"
-        depth = 0
-        in_string = False
-        escaped = False
-        for pos in range(start, len(text)):
-            char = text[pos]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-            elif char == opening:
-                depth += 1
-            elif char == closing:
-                depth -= 1
-                if depth == 0:
-                    candidates.append(text[start:pos + 1].strip())
-                    break
-    return candidates
-
-
 def parse_todos(raw: str) -> list[dict]:
-    text = re.sub(r"<think>[\s\S]*?</think>", "", raw.strip(), flags=re.IGNORECASE)
-    data = None
-    candidates = sorted(json_candidates(text) or [text], key=len, reverse=True)
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-            break
-        except json.JSONDecodeError:
-            continue
+    data = _extract_json(raw or "")
     if data is None:
         return []
     if isinstance(data, dict):

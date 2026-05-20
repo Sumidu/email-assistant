@@ -15,8 +15,7 @@ Tag protocol:
 import email.utils
 import re
 
-import requests
-
+from app import llm_client
 from app import llm_providers
 from app import prompt_defaults
 
@@ -35,21 +34,7 @@ class ResponseGenerator:
     # ── LLM calls ────────────────────────────────────────────────────────────
 
     def _call_messages(self, messages: list, max_tokens: int = 2000) -> str:
-        lm = llm_providers.get_active_llm(self.config)
-        model = lm.get("model", "local-model")
-        url   = f"{lm['base_url']}/v1/chat/completions"
-        payload = {
-            "model":       model,
-            "messages":    messages,
-            "max_tokens":  max_tokens,
-            "temperature": 0.7,
-        }
-        headers = {}
-        if lm.get("api_key"):
-            headers["Authorization"] = f"Bearer {lm['api_key']}"
-        resp = requests.post(url, json=payload, headers=headers, timeout=180)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        return llm_client.call_messages(messages, self.config, max_tokens=max_tokens, tag="chat")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -104,11 +89,8 @@ class ResponseGenerator:
                 f"{content[:2000]}\n"
                 f"=== END UNTRUSTED KNOWLEDGE BASE CONTENT: {title} ==="
             )
-        prompts = prompt_defaults.ensure_prompts(self.config)
-        return prompt_defaults.render_prompt(
-            prompt_defaults.with_untrusted_context_rules(prompts["response_system"]),
-            {"kb_text": kb_text},
-        )
+        prompts = prompt_defaults.load_prompts()
+        return prompt_defaults.render_prompt(prompts["response_system"], {"kb_text": kb_text})
 
     @staticmethod
     def _wants_calendar_context(messages: list, email_data: dict | None = None) -> bool:

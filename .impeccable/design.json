@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-19T00:00:00Z",
+  "title": "Design System: Email Assistant",
+  "extensions": {
+    "colorMeta": {
+      "surface-void":       { "role": "neutral",   "displayName": "Void",                "canonical": "#101114", "tonalRamp": ["#101114","#18191d","#202126","#2a2c32","#363941","#484b55","#7f8491","#a9afbd"] },
+      "surface-base":       { "role": "neutral",   "displayName": "Base",                "canonical": "#18191d", "tonalRamp": ["#101114","#18191d","#202126","#2a2c32","#363941","#484b55","#7f8491","#a9afbd"] },
+      "surface-raised":     { "role": "neutral",   "displayName": "Raised",              "canonical": "#202126", "tonalRamp": ["#101114","#18191d","#202126","#2a2c32","#363941","#484b55","#7f8491","#a9afbd"] },
+      "surface-selection":  { "role": "neutral",   "displayName": "Selection",           "canonical": "#2a2c32", "tonalRamp": ["#101114","#18191d","#202126","#2a2c32","#363941","#484b55","#7f8491","#a9afbd"] },
+      "surface-high":       { "role": "neutral",   "displayName": "High",                "canonical": "#363941", "tonalRamp": ["#101114","#18191d","#202126","#2a2c32","#363941","#484b55","#7f8491","#a9afbd"] },
+      "accent-primary":     { "role": "primary",   "displayName": "iOS Action Blue",     "canonical": "#0a84ff", "tonalRamp": ["#003d80","#0055b3","#006ae0","#0a84ff","#3d9fff","#70baff","#a3d4ff","#d6edff"] },
+      "accent-kb":          { "role": "secondary", "displayName": "Signal Amber",        "canonical": "#e8a000", "tonalRamp": ["#5c4000","#8a6000","#b87d00","#e8a000","#ffb733","#ffcc66","#ffe099","#fff3cc"] },
+      "accent-finish":      { "role": "tertiary",  "displayName": "Finish Green",        "canonical": "#44dd88", "tonalRamp": ["#0a3d23","#145c35","#1f7a47","#2a9960","#44dd88","#77e8a8","#aaf2c8","#ddfae8"] },
+      "accent-finish-strong":{ "role": "tertiary", "displayName": "Done Green",          "canonical": "#22aa66", "tonalRamp": ["#0a3d23","#145c35","#1f7a47","#22aa66","#44dd88","#77e8a8","#aaf2c8","#ddfae8"] },
+      "accent-danger":      { "role": "tertiary",  "displayName": "Danger Red",          "canonical": "#ee4466", "tonalRamp": ["#5c0019","#8a0025","#b80033","#ee4466","#f27797","#f5a3b5","#f9cfd7","#fceef1"] },
+      "accent-calendar":    { "role": "tertiary",  "displayName": "Calendar Blue",       "canonical": "#44aaff", "tonalRamp": ["#003d80","#0055b3","#0070e0","#44aaff","#77c4ff","#aad9ff","#d6edff","#eef7ff"] },
+      "accent-todo":        { "role": "tertiary",  "displayName": "Todo Purple",         "canonical": "#bf5af2", "tonalRamp": ["#400080","#5c00b3","#8000e0","#bf5af2","#cf85f5","#dfb0f8","#efdbfb","#f8f0fd"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Email subject lines, modal section titles. Max 1–2 per view." },
+      "title":   { "displayName": "Title",   "purpose": "Panel headers, folder names, sender names." },
+      "body":    { "displayName": "Body",    "purpose": "Email content, draft text, chat messages, KB files. Reading surfaces use 14px." },
+      "label":   { "displayName": "Label",   "purpose": "Button text, filter labels, column headers, tag text." },
+      "mono":    { "displayName": "Mono",    "purpose": "Activity console, prompt editors, code spans in KB content." }
+    },
+    "shadows": [
+      {
+        "name": "floating",
+        "value": "0 30px 90px rgba(0,0,0,0.55)",
+        "purpose": "Modals, popovers, the progress drawer. Deep umbra roots the floating surface."
+      },
+      {
+        "name": "floating-light",
+        "value": "0 24px 80px rgba(20,28,40,0.16)",
+        "purpose": "Same as floating but for light theme."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px color-mix(in srgb, <accent> 20%, transparent)",
+        "purpose": "Focus rings on interactive elements. 3px, 20% alpha of the element's semantic accent."
+      }
+    ],
+    "motion": [
+      { "name": "fast",     "value": "0.12s ease-out", "purpose": "Border/color hover transitions. Most interactive state changes." },
+      { "name": "standard", "value": "0.18s ease-out", "purpose": "Layout transitions (column resize, folder collapse)." },
+      { "name": "slow",     "value": "0.4s ease-out",  "purpose": "Progress bar fill. Explicit progress feedback." },
+      { "name": "pulse",    "value": "1s ease-in-out infinite alternate", "purpose": "LLM health dot when testing. The only permitted pulsing animation." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "950px", "purpose": "Folders collapse, header compresses, button labels shorten." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The most important action in a context. One per toolbar maximum.",
+      "html": "<button class=\"ds-btn-primary\">Sync</button>",
+      "css": ".ds-btn-primary { background: #0a84ff; color: #fff; border: 1px solid #0a84ff; border-radius: 8px; padding: 6px 12px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; font-weight: 500; height: 30px; cursor: pointer; transition: background 0.12s, border-color 0.12s; } .ds-btn-primary:hover { background: #0070e0; border-color: #0070e0; } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.3); } .ds-btn-primary:disabled { opacity: 0.45; filter: saturate(0.55); cursor: not-allowed; }"
+    },
+    {
+      "name": "KB Action Button",
+      "kind": "button",
+      "refersTo": "button-kb",
+      "description": "Used for LLM and knowledge-base actions. Amber signals model involvement.",
+      "html": "<button class=\"ds-btn-kb\">&#9670; Update Knowledge Base</button>",
+      "css": ".ds-btn-kb { background: rgba(232,160,0,0.10); color: #e8a000; border: 1px solid rgba(232,160,0,0.70); border-radius: 8px; padding: 6px 12px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; font-weight: 500; height: 30px; cursor: pointer; transition: background 0.12s, border-color 0.12s; } .ds-btn-kb:hover { background: rgba(232,160,0,0.16); border-color: #e8a000; } .ds-btn-kb:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(232, 160, 0, 0.25); } .ds-btn-kb:disabled { opacity: 0.45; filter: saturate(0.55); cursor: not-allowed; }"
+    },
+    {
+      "name": "Generate Button (Solid Amber)",
+      "kind": "button",
+      "refersTo": "button-kb",
+      "description": "Solid amber fill: LLM will run now. Used for the Generate action in the draft panel.",
+      "html": "<button class=\"ds-btn-generate\">Generate</button>",
+      "css": ".ds-btn-generate { background: #e8a000; color: #fff; border: 1px solid #e8a000; border-radius: 8px; padding: 6px 12px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.12s, border-color 0.12s; } .ds-btn-generate:hover { background: #cc8c00; border-color: #cc8c00; } .ds-btn-generate:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(232, 160, 0, 0.28); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Default state for secondary toolbar and panel buttons.",
+      "html": "<button class=\"ds-btn-ghost\">Edit</button>",
+      "css": ".ds-btn-ghost { background: #18191d; color: #e2e5eb; border: 1px solid #484b55; border-radius: 8px; padding: 6px 12px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: border-color 0.12s, color 0.12s; } .ds-btn-ghost:hover { border-color: #0a84ff; color: #0a84ff; } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2); } .ds-btn-ghost:disabled { opacity: 0.45; filter: saturate(0.55); cursor: not-allowed; }"
+    },
+    {
+      "name": "Finish Button",
+      "kind": "button",
+      "refersTo": "button-finish",
+      "description": "Actions that complete or archive an email. Green fill, white text.",
+      "html": "<button class=\"ds-btn-finish\">&#10003; Done</button>",
+      "css": ".ds-btn-finish { background: #22aa66; color: #fff; border: 1px solid #22aa66; border-radius: 8px; padding: 6px 12px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.12s, border-color 0.12s; } .ds-btn-finish:hover { background: #1a8a54; border-color: #1a8a54; } .ds-btn-finish:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(34, 170, 102, 0.28); }"
+    },
+    {
+      "name": "Email List Item",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Three-line email preview: sender (bold), subject, metadata row. Selected state uses blue-tinted full border, not a left stripe.",
+      "html": "<div class=\"ds-email-item ds-email-item--unread\"><div class=\"ds-ei-from\">Alice Chen <span class=\"ds-ei-unread-dot\"></span></div><div class=\"ds-ei-subj\">Re: Q3 roadmap proposal</div><div class=\"ds-ei-meta\"><span>2h ago</span><span>Inbox</span></div></div>",
+      "css": ".ds-email-item { padding: 10px 12px; border: 1px solid transparent; border-radius: 10px; margin: 4px 8px; cursor: pointer; transition: background 0.08s; } .ds-email-item:hover { background: #202126; } .ds-email-item.ds-email-item--selected { border-color: rgba(10,132,255,0.45); background: rgba(10,132,255,0.10); } .ds-email-item.ds-email-item--unread { background: rgba(10,132,255,0.06); } .ds-ei-from { font-size: 13px; font-weight: 650; color: #ffffff; display: flex; align-items: center; gap: 6px; margin-bottom: 2px; } .ds-ei-unread-dot { width: 7px; height: 7px; border-radius: 50%; background: #0a84ff; box-shadow: 0 0 0 2px rgba(10,132,255,0.18); flex-shrink: 0; } .ds-ei-subj { font-size: 12.5px; color: #e2e5eb; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-ei-meta { font-size: 9.5px; color: #a9afbd; display: flex; justify-content: space-between; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Standard form input. Amber caret in LLM contexts, blue focus ring everywhere.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Search subject / sender…\" />",
+      "css": ".ds-input { background: #202228; border: 1px solid #484b55; border-radius: 8px; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; font-size: 13px; padding: 8px 10px; outline: none; width: 100%; transition: border-color 0.12s, box-shadow 0.12s; caret-color: #0a84ff; } .ds-input::placeholder { color: #7f8491; } .ds-input:focus { border-color: #0a84ff; box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.20); } .ds-input:disabled { opacity: 0.38; cursor: not-allowed; }"
+    },
+    {
+      "name": "Modal / Dialog",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Floating surface with deep shadow and 14px radius. Header uses text-bright title, not amber.",
+      "html": "<div class=\"ds-modal\"><div class=\"ds-modal-header\"><span class=\"ds-modal-title\">Settings</span><button class=\"ds-modal-close\">&#215;</button></div><div class=\"ds-modal-body\">Content goes here.</div></div>",
+      "css": ".ds-modal { background: #18191d; border: 1px solid #484b55; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 90px rgba(0,0,0,0.55); display: flex; flex-direction: column; } .ds-modal-header { background: #202126; border-bottom: 1px solid #30323a; padding: 13px 18px; display: flex; align-items: center; gap: 10px; } .ds-modal-title { color: #ffffff; font-size: 13px; font-weight: 650; flex: 1; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; } .ds-modal-close { background: none; border: none; color: #a9afbd; font-size: 18px; cursor: pointer; line-height: 1; padding: 2px; font-family: inherit; transition: color 0.12s; } .ds-modal-close:hover { color: #ee4466; } .ds-modal-body { padding: 20px 24px; color: #e2e5eb; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif; line-height: 1.65; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Dark Room",
+    "overview": "This is a working instrument, not an interface. Every pixel serves the process of getting through email with precision and minimal noise. Like a photographic dark room, the environment is controlled: deep neutrals suppress ambient distraction, deliberate signals cut through only when they carry information. Nothing glows for decoration. Nothing pulses for style. If an element is lit, it is lit because it means something.\n\nThe system runs entirely on your machine. That physical fact should be legible in the UI. No cloud gradients, no translucent card stacks, no SaaS-branded color fields. The surface feels more like a calibrated terminal than a web app — sf-pro type on dark bedrock, amber as a semantic cursor rather than a brand color, semantic greens and reds that report state rather than emote.",
+    "keyCharacteristics": [
+      "Tonal depth: five surface steps (bg0–bg4) create hierarchy without shadows in the main layout",
+      "One accent, one role: amber signals LLM/knowledge actions only; blue signals primary UI actions only",
+      "Semantic color discipline: green = done, red = danger, purple = todos, blue = calendar/primary — roles never blur",
+      "Typography is system-native (SF Pro Text) for zero-overhead readability; mono for data",
+      "Floating surfaces (modals, drawers) earn elevation via shadow; panels do not"
+    ],
+    "rules": [
+      { "name": "The One Role, One Color Rule", "body": "Every semantic accent maps to exactly one functional domain. If a new feature needs an accent, it gets a new role assignment — it does not borrow from an existing role.", "section": "colors" },
+      { "name": "The No-Neon Rule", "body": "Accents are used at natural saturation levels, not amplified with glow, bloom, or outer-shadow decoration. Color-matched box-shadows are permitted only for focus rings (3px, 20% alpha) and unread-dot halos (2px, 18% alpha).", "section": "colors" },
+      { "name": "The System Font Rule", "body": "Never load a web font for the app UI. SF Pro Text is free, system-native, and already optimized for macOS rendering.", "section": "typography" },
+      { "name": "The No-Uppercase Rule", "body": "All UI text is sentence case or natural case. The macOS visual refresh removed uppercase + wide letter-spacing. New code must not reintroduce text-transform: uppercase or letter-spacing: 2px patterns.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Panels, columns, toolbars, and list items are flat. They achieve visual separation through tonal surface steps and 1px border lines, not shadows.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use color-mix(in srgb, <accent> 10–16%, surface) for tinted hover and selected backgrounds — it automatically adapts across themes",
+      "Do keep all five surface steps in strict order. A component that should sit 'above' another must use a lighter surface step, not a shadow",
+      "Do use amber exclusively for LLM/knowledge-related actions",
+      "Do keep border-radius at 8px for buttons/inputs, 10px for cards/list items, 14px for modals",
+      "Do use the system font stack. Never add a web font import for UI chrome",
+      "Do anchor floating surfaces with the deep shadow (0 30px 90px var(--shadow))"
+    ],
+    "donts": [
+      "Don't use border-left or border-right > 1px as a colored stripe on cards or list items. The thread-message amber left border is the only exception.",
+      "Don't use Generic SaaS aesthetics: cream backgrounds, rounded-everything, purple/indigo brand accents",
+      "Don't use gradient text (background-clip: text + gradient)",
+      "Don't reintroduce uppercase labels or wide letter-spacing (removed in macOS refresh)",
+      "Don't apply glow, bloom, or oversized outer shadows for decorative lighting",
+      "Don't use glassmorphism (backdrop-filter: blur) on anything except the header bar and modal scrims",
+      "Don't reuse a semantic accent for a second purpose",
+      "Don't use corporate mail client aesthetics: heavy toolbars, blue-on-white, icon-heavy chrome",
+      "Don't use overwrought dark mode patterns: neon on pure black, GPU-demo glow, heavy shadow stacking"
+    ]
+  }
+}
